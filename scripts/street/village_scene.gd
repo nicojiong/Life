@@ -106,7 +106,7 @@ var month_frac := 0.0
 
 ## 存档格式版本：字段增删时递增，读档据此做迁移
 const ContentSchema := preload("res://scripts/core/content_schema.gd")
-const SAVE_SCHEMA_VERSION := 19
+const SAVE_SCHEMA_VERSION := 20
 var save_schema_seen := 0
 ## 读到更高版本的存档后置位：拒绝加载、拒绝覆盖
 var save_future := false
@@ -473,6 +473,7 @@ func _state_dict() -> Dictionary:
 	"boundary_log": boundary_log.duplicate(true), "player_build": (player_build as Dictionary).duplicate(true),
 	"child_pref": child_pref,
 	"npc_state": (npc_state as Dictionary).duplicate(true),
+	"npc_log": (npc_log as Array).duplicate(true), "npc_seq": npc_seq,
 	"apprentice_state": apprentice_state, "master_available": master_available,
 	"heirlooms": (heirlooms as Dictionary).duplicate(true),
 	"family_ill_pending": family_ill_pending, "ill_who": ill_who,
@@ -1122,6 +1123,7 @@ func _replay_snapshot() -> Dictionary:
 		"story": (story as Dictionary).duplicate(true),
 		"relations": (relations as Dictionary).duplicate(true),
 	"npc_state": (npc_state as Dictionary).duplicate(true),
+	"npc_log": (npc_log as Array).duplicate(true), "npc_seq": npc_seq,
 		"cooldown": (action_cooldown as Dictionary).duplicate(true),
 		"facts": (facts as Array).duplicate(true),
 		"pov_state": (pov_state as Dictionary).duplicate(true), "actor_vitals": (actor_vitals as Dictionary).duplicate(true), "event_instances": (event_instances as Array).duplicate(true), "event_seq": event_seq, "opp_last": (opp_last as Dictionary).duplicate(true),
@@ -1273,6 +1275,8 @@ func _continuity_start(seed_value: int, scenario: String = "plain") -> void:
 	last_boundary_fid = 0
 	relations = {}
 	npc_state = {}
+	npc_log = []
+	npc_seq = 0
 	_npc_ensure()
 	action_cooldown = {}
 	parent_dead = {"father": false, "mother": false}
@@ -1392,6 +1396,7 @@ func _continuity_snapshot() -> Dictionary:
 		"household": {"parents_alive": parents_alive, "married": married, "children": children, "land": land},
 		"relations": (relations as Dictionary).duplicate(true),
 	"npc_state": (npc_state as Dictionary).duplicate(true),
+	"npc_log": (npc_log as Array).duplicate(true), "npc_seq": npc_seq,
 		"cooldown": (action_cooldown as Dictionary).duplicate(true),
 		"queue": (event_instances as Array).duplicate(true),
 		"event_seq": event_seq,
@@ -3286,21 +3291,19 @@ func _run_verify_smoke() -> void:
 
 	# M3-01a：核心 NPC 独立生活——玩家不操作也会行动、留下记忆、改变世界
 	_continuity_start(4242, "plain")
-	var npc_facts_b0 := _count_facts("npc")
+	var npc_facts_b0 := npc_log.size()
 	var wealth_b0 := money
 	var learning_b0 := learning
 	# 玩家什么都不做，只推进三年
 	for i in range(36):
 		_advance_months(1)
-	var npc_facts_b1 := _count_facts("npc")
+	var npc_facts_b1 := npc_log.size()
 	var npc_moved_n: bool = npc_facts_b1 > npc_facts_b0
 	var world_npc_changed: bool = money != wealth_b0 or not is_equal_approx(learning, learning_b0)
 	# 三个核心 NPC 各有目标、各有记忆、记忆指向真实事实
 	var goals := {}
 	var remembered := 0
 	var memory_npc_ok := true
-	var bad_fid := 0
-	var bad_facts := 0
 	_npc_ensure()
 	for id in CORE_NPCS:
 		var who := str(id)
@@ -3310,20 +3313,24 @@ func _run_verify_smoke() -> void:
 		if mem.size() > 0:
 			remembered += 1
 		for m in mem:
-			var fid := int((m as Dictionary).get("fid", 0))
-			if fid <= 0 or not _fact_exists(fid):
+			var nid := int((m as Dictionary).get("npc_fid", 0))
+			if nid <= 0 or not _npc_log_exists(nid):
 				memory_npc_ok = false
-	var goals_npc_ok: bool = goals.size() >= 3
+	var distinct_acts := {}
+	for e in npc_log:
+		distinct_acts[str((e as Dictionary).get("cause", ""))] = true
+	var acts_npc_ok: bool = distinct_acts.size() >= 3
+	var goals_npc_ok: bool = goals.size() >= 3 and acts_npc_ok
 	var memory_npc_count_ok: bool = remembered >= 2 and memory_npc_ok
 	# 态度差 → 明确拒绝，而不是沉默
 	var keep_att := int(relations.get("li_shen", 0))
 	relations["li_shen"] = -5
 	npc_state["li_shen"]["last_year"] = 0
-	var refuse_before := _count_facts("npc")
+	var refuse_before := npc_log.size()
 	_npc_year_tick()
-	var refuse_after := _count_facts("npc")
+	var refuse_after := npc_log.size()
 	var refused := false
-	for f in facts:
+	for f in npc_log:
 		var fd: Dictionary = f
 		if str(fd.get("cause", "")) == "npc_li_shen_refuse":
 			refused = true
@@ -3338,7 +3345,7 @@ func _run_verify_smoke() -> void:
 	var npc_ok: bool = npc_moved_n and world_npc_changed and goals_npc_ok and memory_npc_count_ok and refuse_npc_ok and npc_reload_n_ok
 	if npc_ok:
 		oks += 1
-		print("[VERIFY] PASS npc_independent_life facts=", npc_facts_b0, "->", npc_facts_b1, " remembered=", remembered, " goals=", goals.size(), " reload=", npc_reload_n_ok)
+		print("[VERIFY] PASS npc_independent_life facts=", npc_facts_b0, "->", npc_facts_b1, " remembered=", remembered, " goals=", goals.size(), " acts=", distinct_acts.size(), " reload=", npc_reload_n_ok)
 	else:
 		fails.append("npc_independent_life")
 		print("[VERIFY] FAIL npc_independent_life moved=", npc_moved_n, " world=", world_npc_changed, " goals=", goals_npc_ok, " mem=", memory_npc_count_ok, " remembered=", remembered, " memok=", memory_npc_ok, " refuse=", refuse_npc_ok, " reload=", npc_reload_n_ok)
@@ -4762,9 +4769,11 @@ func _spawn_npcs() -> void:
 			"warm": "母亲把手在围裙上擦了擦，蹲下来替你理衣领。",
 			"cold": "母亲没抬头，只说了一句：饭在锅里。"},
 		{"id": "father", "name": father_name, "kind": 4, "home": Vector2(296, 626), "line": father_line},
-		{"id": "a_he", "name": "阿禾", "kind": 0, "home": Vector2(438, 636),
-			"line": "她已经长成大姑娘了，见了你低头就走。",
-			"line_child": "她蹲在地上用树枝画画，画的是两个小人。"},
+	{'id': "a_he", "name": "阿禾", "kind": 0, "home": Vector2(438, 636),
+	 "line": "她已经长成大姑娘了，见了你低头就走。",
+	 "line_child": "她蹲在地上用树枝画画，画的是两个小人。"},
+	{'id': "niu_er", "name": "牛二", "kind": 4, "home": Vector2(560, 700), "line": "他蹲在墙根下，手里捏着半块饼。",
+	 "warm": "他往旁边挪了挪，给你腾了个位置。", "cold": "他翻了个白眼，接着啃饼。"},
 		{"id": "shi_tou", "name": "石头", "kind": 4, "home": Vector2(246, 700),
 			"line": "他跟着他爹学木匠去了，手上的茧比你还厚。",
 			"line_child": "他鼻子上挂着两条虫，手里攥着一只蚂蚱。"},
@@ -7100,11 +7109,26 @@ const NPC_GOALS := {
 	"chuan_fu": "摆渡",
 	"lao_shu": "教蒙童",
 	"a_he": "帮家里干活",
+	"niu_er": "混口饭吃",
 }
 
-const CORE_NPCS := ["li_shen", "wang_xiucai", "zhang_tu"]
+## 12 名核心人物：按行为家族分组，但每人目标不同
+const CORE_NPCS := ["li_shen", "wang_xiucai", "zhang_tu", "wen_po", "li_zheng",
+	"huo_lang", "lao_seng", "you_yi", "chuan_fu", "lao_shu", "a_he", "niu_er"]
+
+const NPC_FAMILY := {
+	"li_shen": "care", "wen_po": "care", "a_he": "care", "lao_seng": "care",
+	"wang_xiucai": "learn", "lao_shu": "learn", "you_yi": "learn",
+	"zhang_tu": "trade", "huo_lang": "trade", "chuan_fu": "trade",
+	"li_zheng": "authority",
+	"niu_er": "drift",
+}
+
 
 var npc_state: Dictionary = {}
+## M3-01b：NPC 行动单独成册，不挤占玩家的人生事实（否则 18 年人生会把 FACT_CAP 撑爆）
+var npc_log: Array = []
+var npc_seq: int = 0
 
 
 func _npc_init() -> void:
@@ -7132,11 +7156,25 @@ func _npc_ensure() -> void:
 				"memory": [], "last_year": 0, "alive": true, "wealth": 3}
 
 
+func _npc_log_exists(nid: int) -> bool:
+	for e in npc_log:
+		if int((e as Dictionary).get("nid", 0)) == nid:
+			return true
+	return false
+
+func _log_npc(cause: String, data: Dictionary = {}) -> int:
+	npc_seq += 1
+	npc_log.append({"nid": npc_seq, "t": _month_index(), "cause": cause, "who": str(data.get("who", "")), "data": data})
+	while npc_log.size() > 400:
+		npc_log.pop_front()
+	return npc_seq
+
+
 func _npc_remember(who: String, text: String, fid: int) -> void:
 	_npc_ensure()
 	var st: Dictionary = npc_state[who]
 	var mem: Array = st.get("memory", [])
-	mem.append({"year": year, "fid": fid, "text": text})
+	mem.append({"year": year, "npc_fid": fid, "text": text})
 	if mem.size() > 12:
 		mem = mem.slice(mem.size() - 12)
 	st["memory"] = mem
@@ -7165,49 +7203,83 @@ func _npc_act(who: String, st: Dictionary) -> void:
 	var attitude := int(st.get("attitude", 0))
 	# 态度太差：明确拒绝（不是随机不做）
 	if attitude <= -2:
-		var rf := _log_fact("npc", "npc_" + who + "_refuse", {"who": who, "goal": str(st.get("goal", ""))})
+		var rf := _log_npc("npc_" + who + "_refuse", {"who": who, "goal": str(st.get("goal", ""))})
 		_npc_remember(who, "他没给你好脸色。", rf)
 		_toast(_npc_name(who) + "把门半掩上了。", Color(0.62, 0.24, 0.18))
 		return
-	match who:
-		"li_shen":
+	var fam := str(NPC_FAMILY.get(who, "care"))
+	var act := ""
+	match fam:
+		"care":
 			if money < 250 or health < 50.0:
 				money += 60
 				health = minf(100.0, health + 1.0)
-				var f := _log_fact("npc", "npc_li_shen_give", {"who": who, "money": 60})
-				_npc_remember(who, "你家揭不开锅，她送了一升米。", f)
-				_toast("李婶端了升米过来，说先吃着。", Color(0.30, 0.42, 0.22))
-				relations[who] = attitude + 1
+				act = "give"
+				_toast(_npc_name(who) + "送了点东西过来。", Color(0.30, 0.42, 0.22))
 			else:
-				var f2 := _log_fact("npc", "npc_li_shen_chat", {"who": who})
-				_npc_remember(who, "她在门口跟你娘说了会儿话。", f2)
-		"wang_xiucai":
+				act = "chat"
+		"learn":
 			if learning >= 20.0 or bool(story.get("拜师", false)):
 				learning += 3.0
-				var f := _log_fact("npc", "npc_wang_xiucai_lend", {"who": who, "learning": 3})
-				_npc_remember(who, "他把一本旧书借给了你。", f)
-				_toast("王秀才把一本《千字文》递给你：别弄脏了。", Color(0.30, 0.42, 0.22))
-				relations[who] = attitude + 1
+				act = "teach"
+				_toast(_npc_name(who) + "指点了你几句。", Color(0.30, 0.42, 0.22))
 			elif bool(story.get("没听家里的", false)):
-				var f2 := _log_fact("npc", "npc_wang_xiucai_warn", {"who": who})
-				_npc_remember(who, "他劝你还是听家里的话。", f2)
+				act = "warn"
 			else:
-				var f3 := _log_fact("npc", "npc_wang_xiucai_read", {"who": who})
-				_npc_remember(who, "他在槐树下读了一下午书。", f3)
-		"zhang_tu":
+				act = "own_work"
+		"trade":
 			if bool(story.get("欠债未还", false)):
 				relations[who] = attitude - 2
-				var f := _log_fact("npc", "npc_zhang_tu_refuse_credit", {"who": who})
-				_npc_remember(who, "他听说了你欠孙四的米，不肯赊账。", f)
-				_toast("张屠户把刀往案板上一拍：不赊。", Color(0.62, 0.24, 0.18))
-			elif money > 800:
+				act = "refuse_credit"
+				_toast(_npc_name(who) + "摇摇头：不赊。", Color(0.62, 0.24, 0.18))
+			elif money > 600 or bool(story.get("借米还清", false)):
 				money += 40
-				var f2 := _log_fact("npc", "npc_zhang_tu_trade", {"who": who, "money": 40})
-				_npc_remember(who, "他多切了二两肉给你。", f2)
-				relations[who] = attitude + 1
+				act = "deal"
+				_toast(_npc_name(who) + "多给了你一点。", Color(0.30, 0.42, 0.22))
 			else:
-				var f3 := _log_fact("npc", "npc_zhang_tu_work", {"who": who})
-				_npc_remember(who, "他一早就在案板前忙。", f3)
+				act = "own_work"
+		"authority":
+			if bool(story.get("欠债未还", false)) or bool(story.get("没听家里的", false)):
+				relations[who] = attitude - 1
+				act = "warn"
+				_toast("里正背着手看了你一眼。", Color(0.62, 0.24, 0.18))
+			else:
+				fame = minf(100.0, fame + 1.0)
+				act = "keep_order"
+		"drift":
+			if money > 300:
+				var take := mini(30, money)
+				money -= take
+				act = "extort"
+				_toast(_npc_name(who) + "笑嘻嘻地顺走了你几个钱。", Color(0.62, 0.24, 0.18))
+				relations[who] = attitude - 1
+			else:
+				act = "loiter"
+	var f := _log_npc("npc_" + who + "_" + act, {"who": who, "goal": str(st.get("goal", "")), "act": act})
+	_npc_remember(who, _npc_act_line(act, who), f)
+
+
+func _npc_act_line(act: String, who: String) -> String:
+	match act:
+		"give":
+			return "你家紧的时候，他送了点东西。"
+		"chat":
+			return "他和家里人在门口说了会儿话。"
+		"teach":
+			return "他借了你一本书，指了几处字。"
+		"warn":
+			return "他提醒你，别把事情做绝。"
+		"refuse_credit":
+			return "他听说了欠债的事，不肯赊账。"
+		"deal":
+			return "他多做了你一点生意。"
+		"keep_order":
+			return "他在村里转了一圈，把事压下去了。"
+		"extort":
+			return "他嬉皮笑脸地拿走了几个钱。"
+		"loiter":
+			return "他一整天蹲在墙根下晒太阳。"
+	return "他忙了一天自己的事。"
 
 
 func _npc_name(who: String) -> String:
