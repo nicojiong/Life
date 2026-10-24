@@ -364,10 +364,10 @@
                                          "6–12可以争取和拒绝部分安排；12+扩大行动空间",
                                          "不可行动说明理由和替代方案；无出生终身职业锁定"
                                      ],
-                      "status":  "todo",
+                      "status":  "in_progress",
                       "owner":  null,
                       "evidence":  [
-
+                                       "docs/verification/M2-04a.md"
                                    ],
                       "commit_sha":  null,
                       "remote_sha":  null,

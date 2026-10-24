@@ -1799,6 +1799,29 @@ func _run_verify_smoke() -> void:
 	facts = []
 	fact_seq = 0
 
+	# M2-04：分阶段自主权——小孩看不见大人的选项
+	var keep_stage_age := age
+	age = 5
+	var s5 := _autonomy_stage()
+	var g5_marry: bool = _action_gated({"min_age": 15})
+	var g5_any: bool = _action_gated({"label": "随便走走"})
+	age = 10
+	var s10 := _autonomy_stage()
+	var g10_minor: bool = _action_gated({"min_stage": "minor"})
+	var g10_adult: bool = _action_gated({"min_stage": "adult"})
+	age = 20
+	var s20 := _autonomy_stage()
+	var g20_adult: bool = _action_gated({"min_stage": "adult"})
+	age = keep_stage_age
+	var stage_ok: bool = s5 == "infant" and s10 == "minor" and s20 == "adult" \
+		and g5_marry and not g5_any and not g10_minor and g10_adult and not g20_adult
+	if stage_ok:
+		oks += 1
+		print("[VERIFY] PASS autonomy_stage_gates ", s5, "->", s10, "->", s20)
+	else:
+		fails.append("autonomy_stage_gates")
+		print("[VERIFY] FAIL autonomy_stage_gates ", s5, " ", s10, " ", s20, " marry=", g5_marry, " adult10=", g10_adult)
+
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
 	var keep_age := age
@@ -3295,12 +3318,43 @@ func _close_panel() -> void:
 	queue_redraw()
 
 
+const STAGE_RANK := {"infant": 0, "minor": 1, "adult": 2}
+
+
+func _autonomy_stage() -> String:
+	# M2-04：分阶段自主权。0-6 由父母带着过，7-14 只能做有限的事，15 起自己拿主意
+	if age < 7:
+		return "infant"
+	if age < 15:
+		return "minor"
+	return "adult"
+
+
+func _stage_label() -> String:
+	match _autonomy_stage():
+		"infant":
+			return "（蒙养之年，由父母带着过）"
+		"minor":
+			return "（渐知人事，能做的事还少）"
+	return ""
+
+
+func _action_gated(act: Dictionary) -> bool:
+	# 行动级门槛：显式 min_age，或要求达到某个自主阶段
+	if age < int(act.get("min_age", 0)):
+		return true
+	var need := str(act.get("min_stage", ""))
+	if need == "":
+		return false
+	return int(STAGE_RANK.get(_autonomy_stage(), 2)) < int(STAGE_RANK.get(need, 2))
+
+
 func _open_panel(id: String) -> void:
 	var b := _by_id(id)
 	if b.is_empty():
 		return
 	panel_title.text = str(b["name"])
-	panel_sub.text = _panel_subtitle(id)
+	panel_sub.text = _panel_subtitle(id) + _stage_label()
 	for c in panel_actions.get_children():
 		panel_actions.remove_child(c)
 		c.queue_free()
@@ -3319,6 +3373,8 @@ func _open_panel(id: String) -> void:
 
 	for a in _actions_for(id):
 		var act: Dictionary = a
+		if _action_gated(act):
+			continue
 		var btn := UIKit.choice(_strip_time(str(act["label"])))
 		if int(act.get("cost", 0)) > money:
 			btn.disabled = true
@@ -3829,10 +3885,10 @@ func _actions_for(id: String) -> Array:
 			var can_sheng := exam_year and story.has("举人") and not story.has("进士") and learning >= 42.0 and age >= 18 and age <= 45
 			if can_jie:
 				acts.append({"label": "应解试（今年开科，八百文）", "months": 3, "cost": 800,
-					"special": "jieshi"})
+					"special": "jieshi", "min_age": 12})
 			elif can_sheng:
 				acts.append({"label": "应省试（进京，一年，三千文）", "months": 12, "cost": 3000,
-					"special": "shengshi"})
+					"special": "shengshi", "min_age": 16})
 			acts.append({"label": "在书院读经（一年，两千文）", "months": 12, "cost": 2000,
 				"gain": {"learning": 13, "fame": 2}, "flag": "读书",
 				"flavor": "山长讲《春秋》，一堂课下来，你手心出汗。"})
@@ -3858,7 +3914,7 @@ func _actions_for(id: String) -> Array:
 		"yamen":
 			var yacts: Array = []
 			if story.has("进士") and office_rank == 0:
-				yacts.append({"label": "赴任（半年）", "months": 6, "special": "take_post"})
+				yacts.append({"label": "赴任（半年）", "months": 6, "special": "take_post", "min_age": 18})
 			if office_rank >= 1:
 				yacts.append({"label": "秉公断案（半年）", "months": 6, "special": "judge_fair"})
 				yacts.append({"label": "收一笔贿（半年）", "months": 6, "special": "judge_bribe"})
@@ -3949,7 +4005,7 @@ func _actions_for(id: String) -> Array:
 			if mil_rank == 1:
 				dacts.append({"label": "操练（半年）", "months": 6, "gain": {"money": 500, "health": 2},
 					"flavor": "半年下来，能拉开一石弓了。"})
-				dacts.append({"label": "随军出征（一年，会死人）", "months": 12, "special": "expedition"})
+				dacts.append({"label": "随军出征（一年，会死人）", "months": 12, "special": "expedition", "min_age": 16})
 			if mil_rank == 1 and merit >= 2 and health >= 55.0:
 				dacts.append({"label": "升作厢军（三个月）", "months": 3, "special": "promote_nco"})
 			if mil_rank == 2:

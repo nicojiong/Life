@@ -9,9 +9,9 @@
     "godot_run":  "import_only",
     "game_code_modified":  false,
     "remote_mutations_performed":  true,
-    "current_task":  "M2-03",
+    "current_task":  "M2-04",
     "next_task":  "M1-04",
-    "task_status":  "M2-03c-pushed",
+    "task_status":  "M2-04a-pushed",
     "branch":  "16 个 agent/* 堆叠分支（见 docs/DELIVERY_M1.md）",
     "base_sha":  "bf0846f1c20cbcf4dd0cf5f5707b0cf1c88e12cb",
     "commit_sha":  "4466c07634746641983a8522d06997e3b5e61d03",
@@ -24,5 +24,5 @@
                      "docs/BASELINE.md",
                      "docs/tasks/M0-01.md"
                  ],
-    "next_step":  "M2-04 分阶段自主权"
+    "next_step":  "M2-05 0-18 岁可玩因果切片；或继续给更多行动加门槛"
 }
