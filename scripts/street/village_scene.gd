@@ -105,7 +105,7 @@ var women_rank := 0
 var month_frac := 0.0
 
 ## 存档格式版本：字段增删时递增，读档据此做迁移
-const SAVE_SCHEMA_VERSION := 4
+const SAVE_SCHEMA_VERSION := 5
 var save_schema_seen := 0
 ## A03：父母是否已故（保留人物记录，不用删除表示死亡）
 var parent_dead := {"father": false, "mother": false}
@@ -136,6 +136,17 @@ func _rndi(a: int, b: int) -> int:
 
 func _rndf(a: float, b: float) -> float:
 	return sim_rng.randf_range(a, b)
+
+
+## M1-03b：事实日志。每条记"什么时候、什么类型、由什么引起"，供墓志与调试追溯
+var facts: Array = []
+const FACT_CAP := 240
+
+
+func _log_fact(kind: String, cause: String, data: Dictionary = {}) -> void:
+	facts.append({"t": _month_index(), "kind": kind, "cause": cause, "data": data})
+	if facts.size() > FACT_CAP:
+		facts = facts.slice(facts.size() - FACT_CAP)
 
 var _re_time := RegEx.new()
 
@@ -359,6 +370,7 @@ func _state_dict() -> Dictionary:
 		"time_scale": time_scale, "slot": slot,
 		"parent_dead": parent_dead, "parent_death_year": parent_death_year,
 		"action_cooldown": action_cooldown, "last_settled_year": last_settled_year,
+		"facts": facts,
 		# RNG 的 64 位 seed/state 用十进制字符串，避免 JSON 精度丢失
 		"sim_seed": str(sim_seed), "sim_state": str(sim_rng.state),
 		"px": player.x, "py": player.y, "hour": hour,
@@ -514,6 +526,8 @@ func _load_game() -> bool:
 	if d.get("action_cooldown") is Dictionary:
 		action_cooldown = d["action_cooldown"]
 	last_settled_year = int(d.get("last_settled_year", last_settled_year))
+	if d.get("facts") is Array:
+		facts = d["facts"]
 	if d.has("sim_seed") and d.has("sim_state"):
 		sim_seed = int(str(d["sim_seed"]))
 		sim_rng.seed = sim_seed
@@ -1042,6 +1056,30 @@ func _run_verify_smoke() -> void:
 		print("[VERIFY] FAIL rng_reproducible same=", seq_a == seq_b,
 			" loaded=", ok_rng_load, " expected=", expected_next, " actual=", actual_next)
 	_init_sim_rng(4242)
+
+	# M1-03b：事实日志每条都要有类型与起因，时间不回退
+	facts = []
+	_apply_event("drought")
+	_log_fact("exam", "test_cause", {"note": "x"})
+	var ok_facts := facts.size() >= 2
+	var last_t := -1
+	for f in facts:
+		var fd: Dictionary = f
+		if str(fd.get("kind", "")) == "" or str(fd.get("cause", "")) == "":
+			ok_facts = false
+		if int(fd.get("t", 0)) < last_t:
+			ok_facts = false
+		last_t = int(fd.get("t", 0))
+	var kinds: Array = []
+	for f in facts:
+		kinds.append(str((f as Dictionary).get("kind", "")))
+	if ok_facts and kinds.has("event"):
+		oks += 1
+		print("[VERIFY] PASS facts_have_causes kinds=", kinds)
+	else:
+		fails.append("facts_have_causes")
+		print("[VERIFY] FAIL facts_have_causes ok=", ok_facts, " kinds=", kinds)
+	facts = []
 
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
@@ -2686,6 +2724,7 @@ func _parent_death() -> void:
 	# A03：用 alive/death_record 表示死亡，不再靠删除人物实体
 	parent_dead[who] = true
 	parent_death_year[who] = year
+	_log_fact("death", "old_age", {"who": who, "age": p_age})
 	_switch_pov("child")
 	_spawn_npcs()
 	_refresh_pov_bar()
@@ -3544,6 +3583,7 @@ func _apply_special(s: String) -> void:
 		spouse_name = "李氏"
 		story["married"] = true
 		story["meiren_done"] = true
+		_log_fact("marriage", "meiren", {"spouse": spouse_name})
 	elif s == "pay_debt":
 		story.erase("欠李婶")
 		story["清账"] = true
@@ -3863,6 +3903,7 @@ func _apply_special(s: String) -> void:
 		if _rnd() < p:
 			story["举人"] = true
 			fame = minf(100.0, fame + 18.0)
+			_log_fact("exam", "jieshi_pass", {"year": year})
 			_play_cutscene("解 试", [
 				"榜贴在州学墙上，人挤得水泄不通。",
 				"你从最后一行往前看，看见了自己的名字。",
@@ -3870,6 +3911,7 @@ func _apply_special(s: String) -> void:
 			], false)
 		else:
 			fame = maxf(0.0, fame - 1.0)
+			_log_fact("exam", "jieshi_fail", {"year": year})
 			_toast("解试落第。你在贡院外站到人都散了。", Color(0.62, 0.24, 0.18))
 	elif s == "shengshi":
 		var p2 := clampf(-0.08 + learning * 0.008, 0.04, 0.85)
@@ -3884,6 +3926,7 @@ func _apply_special(s: String) -> void:
 			], false)
 		else:
 			fame = maxf(0.0, fame - 2.0)
+			_log_fact("exam", "shengshi_fail", {"year": year})
 			_toast("省试落第。盘缠花光了，你在京城住了半年才凑够路费。", Color(0.62, 0.24, 0.18))
 
 
@@ -4119,6 +4162,7 @@ func _roll_event() -> void:
 
 
 func _apply_event(id: String) -> void:
+	_log_fact("event", "year_end", {"id": id})
 	var bad := Color(0.62, 0.24, 0.18)
 	var good := Color(0.30, 0.42, 0.22)
 	match id:

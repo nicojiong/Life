@@ -12,8 +12,8 @@
     "current_task":  "M1-03",
     "next_task":  "M1-04",
     "task_status":  "in_progress",
-    "branch":  "agent/M1-03a-sim-rng",
-    "base_sha":  "2315660ee8acfd37fd112a1477192f2c8831ff13",
+    "branch":  "agent/M1-03b-fact-log",
+    "base_sha":  "91ab2938972fa02dc183cb24274ca0723ce2fe4e",
     "commit_sha":  "07fbe20d45fa6d8ce4c9ff0914471a74b2a92401",
     "remote_sha":  "07fbe20d45fa6d8ce4c9ff0914471a74b2a92401",
     "pr_url":  null,
@@ -24,5 +24,5 @@
                      "docs/BASELINE.md",
                      "docs/tasks/M0-01.md"
                  ],
-    "next_step":  "推送后记录 SHA；M1-03b：Fact/EventLog 与 cause_ids"
+    "next_step":  "推送后记录 SHA；M1-03c：墓志读日志"
 }

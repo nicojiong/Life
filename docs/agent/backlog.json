@@ -194,6 +194,7 @@
                       "owner":  null,
                       "evidence":  [
                                        "docs/verification/M1-03a.md",
+                                       "docs/verification/M1-03b.md",
                                        "docs/tasks/M1-03.md"
                                    ],
                       "commit_sha":  null,
