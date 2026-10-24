@@ -326,6 +326,10 @@ func _save_file() -> String:
 
 
 func _save_game() -> void:
+	# A01：人生已经结束后不再写普通存档，否则会覆盖死亡时清掉的档
+	if ended:
+		print("[SAVE] refused_after_end")
+		return
 	var f := FileAccess.open(_save_file(), FileAccess.WRITE)
 	if f == null:
 		return
@@ -730,6 +734,22 @@ func _run_verify_smoke() -> void:
 	else:
 		fails.append("npc_ids_unique")
 		print("[VERIFY] FAIL npc_ids_unique duplicate=", dup_id)
+
+	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
+	var keep_money := money
+	var keep_age := age
+	money = 1000
+	age = 40
+	lifespan = 40
+	_on_action({"label": "长活", "months": 12, "gain": {"money": 5000}})
+	if ended and money == 1000:
+		oks += 1
+		print("[VERIFY] PASS death_blocks_reward money=", money)
+	else:
+		fails.append("death_blocks_reward")
+		print("[VERIFY] FAIL death_blocks_reward ended=", ended, " money=", money)
+	money = keep_money
+	age = keep_age
 
 	print("[VERIFY] SUMMARY pass=", oks, " fail=", fails.size(), " failed=", fails)
 	get_tree().quit(0 if fails.is_empty() else 1)
@@ -3084,10 +3104,18 @@ func _on_action(act: Dictionary) -> void:
 	var m := int(act.get("months", 1))
 	if m >= 6:
 		_advance_months(m)
+		# A01：跳过的时间可能已经把人跳死了，死亡优先于本次行动的收益
+		if ended:
+			print("[ACTION] interrupted_before_reward ", str(act.get("label", "")))
+			return
 	if act.has("gain"):
 		_apply_gain(act["gain"])
 	if act.has("special"):
 		_apply_special(str(act["special"]))
+		# 战死等特殊效果会在这里结束人生，后续不再发奖、不再写普通存档
+		if ended:
+			print("[ACTION] interrupted_after_special ", str(act.get("label", "")))
+			return
 	if act.has("flag"):
 		story[str(act["flag"])] = true
 	if act.has("flavor"):
@@ -3513,8 +3541,22 @@ func _apply_special(s: String) -> void:
 
 # ---------------------------------------------------------------- 时间
 
+func _trigger_actor_end() -> void:
+	# A01：人生结束只触发一次；当前控制谁，就结束谁的人生
+	if ended:
+		return
+	if pov == "child":
+		_ending()
+	else:
+		_parent_death()
+
+
 func _advance_months(n: int) -> void:
 	for i in range(n):
+		# 已经到寿或已垮掉的人，不再推进时间，也不留下未结算的收益
+		if age >= lifespan or health <= 0.0:
+			_trigger_actor_end()
+			return
 		month += 1
 		if shop_open:
 			shop["market"] = clampf(float(shop.get("market", 1.0)) + randf_range(-0.045, 0.045), 0.70, 1.40)
@@ -3529,14 +3571,9 @@ func _advance_months(n: int) -> void:
 				var st: Dictionary = pov_state[k]
 				st["age"] = int(st.get("age", age)) + 1
 			_on_new_year()
-			if not ended and (age >= lifespan or health <= 0.0):
-				if pov == "child":
-					_ending()
-				else:
-					_parent_death()
+			if age >= lifespan or health <= 0.0:
+				_trigger_actor_end()
 				return
-		if age >= lifespan or health <= 0.0:
-			return
 
 
 func _on_new_year() -> void:

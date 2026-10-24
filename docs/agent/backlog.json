@@ -108,10 +108,11 @@
                                          "如暂未建人生档案，先留可靠迁移检查点，不再静默清档又重写",
                                          "行动完成与死亡同tick时，主体死亡判定先于完成收益；先前已结算部分保留"
                                      ],
-                      "status":  "todo",
+                      "status":  "implemented",
                       "owner":  null,
                       "evidence":  [
-
+                                       "docs/verification/M0-04.md",
+                                       "docs/tasks/M0-04.md"
                                    ],
                       "commit_sha":  null,
                       "remote_sha":  null,
