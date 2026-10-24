@@ -11,18 +11,18 @@
     "remote_mutations_performed":  true,
     "current_task":  "M1-05 跨进程续跑",
     "next_task":  "M1-05 续跑：其余场景与产物级反向验证",
-    "task_status":  "M1-05c-continuity-first-green",
+    "task_status":  "M1-05c-first-scenario-green",
     "branch":  "agent/M1-ci-workflow",
     "base_sha":  "bf0846f1c20cbcf4dd0cf5f5707b0cf1c88e12cb",
-    "commit_sha":  "c0a6cfebf864bb7dfb02e8dba76475ba4e97b972",
-    "remote_sha":  "c0a6cfebf864bb7dfb02e8dba76475ba4e97b972",
+    "commit_sha":  "dd9e9fd7efe280a0c2d33da395d74423a7396584",
+    "remote_sha":  "dd9e9fd7efe280a0c2d33da395d74423a7396584",
     "pr_url":  "https://github.com/nicojiong/Life/pull/1",
-    "ci_status":  "green (commit c0a6cfe checks page)",
+    "ci_status":  "green: isolated-smoke + continuity 两个 job 均 success (dd9e9fd)",
     "integrated_sha":  null,
     "blocked_reason":  "仍有限制：只有 Linux CI；数据文件无 schema 校验；无真人试玩。PR 已存在（#1, Draft），不再阻塞。",
     "evidence":  [
                      "docs/verification/M2-01e.md",
                      "docs/verification/M1-05c.md"
                  ],
-    "next_step":  "父母视角待办 / 死亡边界 / 非零 month_frac 三个场景接入同一比较器"
+    "next_step":  "续跑其余场景：父母待办、死亡边界、非零 month_frac、产物级反向验证"
 }
