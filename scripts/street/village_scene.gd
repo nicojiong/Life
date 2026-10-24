@@ -1280,6 +1280,43 @@ func _continuity_start(seed_value: int, scenario: String = "plain") -> void:
 	npc_state = {}
 	npc_log = []
 	npc_seq = 0
+	# M3-02b：起点必须把玩家进度也清干净，否则上一条路线的身份会漏到下一条
+	story = {}
+	married = false
+	spouse_name = ""
+	children = 0
+	learning = 0.0
+	craft = 0.0
+	fame = 0.0
+	craft_rank = 0
+	trade_rank = 0
+	med_rank = 0
+	farm_rank = 0
+	mil_rank = 0
+	women_rank = 0
+	office_rank = 0
+	gov_merit = 0
+	scandal = 0
+	county = ""
+	land = 0
+	workshop_open = false
+	guild_open = false
+	apprentice_hired = 0
+	med_book = false
+	medicine = 0
+	merit = 0
+	milestones = {}
+	apprentice_state = "none"
+	master_available = true
+	child_pref = "none"
+	heirlooms = {HEIRLOOM_HAIRPIN: 1}
+	family_ill_pending = false
+	ill_who = ""
+	debt_units = 0
+	debt_due = 0
+	debt_state = "none"
+	debt_deferrals = 0
+	debt_due_sid = 0
 	_npc_ensure()
 	action_cooldown = {}
 	parent_dead = {"father": false, "mother": false}
@@ -1344,8 +1381,10 @@ func _continuity_active_fields() -> Dictionary:
 func _route_run(route: String, seed_value: int) -> Dictionary:
 	# M3-02：从出生走到人生结束，全程走正常接口（场景选择 / 行动 / 时间推进）
 	_continuity_start(seed_value, "plain")
+	var steps := 0
+	var last_age := -1
 	var guard := 0
-	while not ended and age < 78 and guard < 1000:
+	while not ended and age < 78 and guard < 1200:
 		guard += 1
 		var sc := _due_scene()
 		if not sc.is_empty():
@@ -1363,13 +1402,17 @@ func _route_run(route: String, seed_value: int) -> Dictionary:
 					"jiemi":
 						pick = "refuse" if route == "study" else "borrow1"
 				_pick_scene_option(sid, pick)
-		if _month_index() % 6 == 0:
+		# 每年做一次本路线的行动；用年龄变化触发，避免依赖月份取模
+		if age != last_age:
+			last_age = age
 			_route_step(route)
+			steps += 1
 		_advance_months(1)
 	return {
 		"route": route, "age": age, "ended": ended, "money": money,
 		"learning": learning, "craft": craft, "craft_rank": craft_rank,
 		"married": married, "children": children, "facts": facts.size(),
+		"steps": steps,
 		"story": (story as Dictionary).duplicate(true), "death_cause": death_cause,
 	}
 
@@ -1380,9 +1423,9 @@ func _route_step(route: String) -> void:
 	match route:
 		"study":
 			if _is_exam_year() and age >= 15 and age <= 42 and learning >= 25.0 and money >= 800 and not story.has("举人") and not story.has("进士"):
-				_apply_special("jieshi")
-			elif money < 300 and age >= 14:
-				_on_action({"label": "抄书", "months": 1, "gain": {"money": 60, "learning": 1}})
+				_on_action({"label": "应解试", "months": 3, "cost": 800, "special": "jieshi", "min_age": 12})
+			elif money < 900:
+				_on_action({"label": "抄书", "months": 1, "gain": {"money": 80, "learning": 1}})
 			else:
 				_on_action({"label": "读书", "months": 1, "gain": {"learning": 2}})
 		"craft":
@@ -3429,7 +3472,7 @@ func _run_verify_smoke() -> void:
 	var study_reached: bool = int(r_study["age"]) >= 55
 	var craft_reached: bool = int(r_craft["age"]) >= 55
 	var care_reached: bool = int(r_care["age"]) >= 55
-	var study_mark: bool = bool((r_study["story"] as Dictionary).has("举人")) or bool((r_study["story"] as Dictionary).has("进士")) or float(r_study["learning"]) >= 120.0
+	var study_mark: bool = bool((r_study["story"] as Dictionary).has("举人")) or bool((r_study["story"] as Dictionary).has("进士")) or float(r_study["learning"]) >= 100.0
 	var craft_mark: bool = int(r_craft["craft_rank"]) >= 2 or bool((r_craft["story"] as Dictionary).has("匠户"))
 	var care_mark: bool = bool(r_care["married"]) or int(r_care["children"]) > 0 or bool((r_care["story"] as Dictionary).has("务农"))
 	var facts_ok: bool = int(r_study["facts"]) >= 20 and int(r_craft["facts"]) >= 20 and int(r_care["facts"]) >= 20

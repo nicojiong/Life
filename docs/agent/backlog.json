@@ -472,7 +472,8 @@
                       "status":  "in_progress",
                       "owner":  null,
                       "evidence":  [
-                                       "docs/verification/M3-02a-routes.md"
+                                       "docs/verification/M3-02a-routes.md",
+                                       "docs/verification/M3-02b-route-fix.md"
                                    ],
                       "commit_sha":  null,
                       "remote_sha":  null,
