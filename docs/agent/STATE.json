@@ -9,11 +9,11 @@
     "godot_run":  "import_only",
     "game_code_modified":  false,
     "remote_mutations_performed":  true,
-    "current_task":  "M0-02",
-    "next_task":  "M0-03",
-    "task_status":  "pushed",
-    "branch":  "agent/M0-02-verify-entry",
-    "base_sha":  "4c64fbe09884feb37e090a7683d05f910021f1e0",
+    "current_task":  "M0-03",
+    "next_task":  "M0-04",
+    "task_status":  "implemented",
+    "branch":  "agent/M0-03-content-ids",
+    "base_sha":  "3d57967b9fc8989a5902822607da78066ba3ecb4",
     "commit_sha":  "efc5e4db74dad7c52af9767ab1b222d9bf76307f",
     "remote_sha":  "efc5e4db74dad7c52af9767ab1b222d9bf76307f",
     "pr_url":  null,
@@ -24,5 +24,5 @@
                      "docs/BASELINE.md",
                      "docs/tasks/M0-01.md"
                  ],
-    "next_step":  "评审并合并 M0-02 后标 done，然后领取 M0-03（统一内容 ID，修 商贾/商人 接线）"
+    "next_step":  "推送后记录 SHA；随后做 M0-04 死亡边界"
 }

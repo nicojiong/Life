@@ -81,10 +81,11 @@
                                          "重复lao_seng与不存在引用会被校验拒绝",
                                          "只改必要映射，保留合法出身分布"
                                      ],
-                      "status":  "todo",
+                      "status":  "implemented",
                       "owner":  null,
                       "evidence":  [
-
+                                       "docs/verification/M0-03.md",
+                                       "docs/tasks/M0-03.md"
                                    ],
                       "commit_sha":  null,
                       "remote_sha":  null,

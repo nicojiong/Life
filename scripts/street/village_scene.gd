@@ -689,6 +689,48 @@ func _run_verify_smoke() -> void:
 		fails.append("parents_present")
 		print("[VERIFY] FAIL parents_present ", pov_state.keys())
 
+	# A09：出身 flag → 父亲行当 的接线
+	if _father_trade_for(["商贾"]) == "商" and _father_trade_for(["匠人"]) == "匠" \
+			and _father_trade_for(["军户"]) == "兵" and _father_trade_for(["士人"]) == "吏" \
+			and _father_trade_for(["农家"]) == "农":
+		oks += 1
+		print("[VERIFY] PASS father_trade_mapping")
+	else:
+		fails.append("father_trade_mapping")
+		print("[VERIFY] FAIL father_trade_mapping")
+
+	# A09：数据里真实存在「商贾」出身，且能被映射成商人
+	var merchant_found := false
+	var merchant_ok := false
+	for o in DB.origins:
+		var of: Array = o.get("flags", [])
+		if of.has("商贾"):
+			merchant_found = true
+			merchant_ok = _father_trade_for(of) == "商"
+	if merchant_found and merchant_ok:
+		oks += 1
+		print("[VERIFY] PASS merchant_origin_wired")
+	else:
+		fails.append("merchant_origin_wired")
+		print("[VERIFY] FAIL merchant_origin_wired found=", merchant_found, " ok=", merchant_ok)
+
+	# 内容 ID 唯一：NPC 不允许重复 id
+	var seen_ids := {}
+	var dup_id := ""
+	for n in npcs:
+		var nid := str(n.get("id", ""))
+		if nid == "":
+			continue
+		if seen_ids.has(nid):
+			dup_id = nid
+		seen_ids[nid] = true
+	if dup_id == "":
+		oks += 1
+		print("[VERIFY] PASS npc_ids_unique count=", seen_ids.size())
+	else:
+		fails.append("npc_ids_unique")
+		print("[VERIFY] FAIL npc_ids_unique duplicate=", dup_id)
+
 	print("[VERIFY] SUMMARY pass=", oks, " fail=", fails.size(), " failed=", fails)
 	get_tree().quit(0 if fails.is_empty() else 1)
 
@@ -1037,16 +1079,7 @@ func _init_identity() -> void:
 	father_name = str(nm["surname"]) + str(fathers[r.randi_range(0, fathers.size() - 1)])
 	mother_name = str(mothers[r.randi_range(0, mothers.size() - 1)]) + "氏"
 	# 父亲的行当、母亲的性情——决定童年被怎么带大
-	if origin_flags.has("匠人"):
-		father_trade = "匠"
-	elif origin_flags.has("商人"):
-		father_trade = "商"
-	elif origin_flags.has("军户"):
-		father_trade = "兵"
-	elif origin_flags.has("读书") or origin_flags.has("士人"):
-		father_trade = "吏"
-	else:
-		father_trade = "农"
+	father_trade = _father_trade_for(origin_flags)
 	var temps := ["和", "严", "病"]
 	mother_temper = str(temps[r.randi_range(0, temps.size() - 1)])
 	pov_state["father"] = _make_parent("father", r)
@@ -1933,6 +1966,19 @@ func _finish_walk() -> void:
 		_open_panel(id)
 
 
+func _father_trade_for(flags: Array) -> String:
+	# 出身 flag → 父亲行当。数据里用的是「商贾」，历史代码曾写「商人」，两者都接受。
+	if flags.has("匠人"):
+		return "匠"
+	if flags.has("商贾") or flags.has("商人"):
+		return "商"
+	if flags.has("军户"):
+		return "兵"
+	if flags.has("读书") or flags.has("士人"):
+		return "吏"
+	return "农"
+
+
 func _spawn_npcs() -> void:
 	npcs = []
 	var r := RandomNumberGenerator.new()
@@ -1963,7 +2009,6 @@ func _spawn_npcs() -> void:
 		{"id": "zhang_tu", "name": "张屠户", "kind": 4, "home": Vector2(1224, 572), "line": "案板上还挂着半扇肉，他手上的刀没停。",
 			"warm": "他切下一小块肉推过来：拿去，不算钱。",
 			"cold": "他把刀往案板上一拍：今天不赊账。"},
-		{"id": "lao_seng", "name": "老僧", "kind": 3, "home": Vector2(1644, 912), "line": "他扫地，扫得很慢，一下一下。"},
 		{"id": "lao_seng", "name": "老僧", "kind": 3, "home": Vector2(1644, 912), "line": "他扫地，扫得很慢，一下一下。"},
 		{"id": "huo_lang", "name": "货郎", "kind": 1, "home": Vector2(1004, 852), "line": "担子两头挂着针线、糖人、小鼓。"},
 		{"id": "li_zheng", "name": "里正", "kind": 4, "home": Vector2(1258, 862), "line": "他背着手站在井边，看谁家烟囱没冒烟。"},
