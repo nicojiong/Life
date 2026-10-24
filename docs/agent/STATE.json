@@ -9,9 +9,9 @@
     "godot_run":  "import_only",
     "game_code_modified":  false,
     "remote_mutations_performed":  true,
-    "current_task":  "连续运行 vs 真实退出重载续跑",
-    "next_task":  "连续运行 vs 真实退出重载续跑",
-    "task_status":  "binding-test-restored",
+    "current_task":  "M1-05 跨进程续跑",
+    "next_task":  "M1-05 续跑：其余场景与产物级反向验证",
+    "task_status":  "M1-05c-continuity-first-green",
     "branch":  "agent/M1-ci-workflow",
     "base_sha":  "bf0846f1c20cbcf4dd0cf5f5707b0cf1c88e12cb",
     "commit_sha":  "c0a6cfebf864bb7dfb02e8dba76475ba4e97b972",
@@ -21,8 +21,8 @@
     "integrated_sha":  null,
     "blocked_reason":  "仍有限制：只有 Linux CI；数据文件无 schema 校验；无真人试玩。PR 已存在（#1, Draft），不再阻塞。",
     "evidence":  [
-                     "docs/verification/M2-01d.md",
-                     "docs/verification/M2-01e.md"
+                     "docs/verification/M2-01e.md",
+                     "docs/verification/M1-05c.md"
                  ],
-    "next_step":  "跨进程续跑验收（runner + 快照 + 三进程比对 + 反向验证）"
+    "next_step":  "父母视角待办 / 死亡边界 / 非零 month_frac 三个场景接入同一比较器"
 }

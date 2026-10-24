@@ -105,7 +105,7 @@ var women_rank := 0
 var month_frac := 0.0
 
 ## 存档格式版本：字段增删时递增，读档据此做迁移
-const SAVE_SCHEMA_VERSION := 12
+const SAVE_SCHEMA_VERSION := 13
 var save_schema_seen := 0
 ## 读到更高版本的存档后置位：拒绝加载、拒绝覆盖
 var save_future := false
@@ -421,7 +421,7 @@ func _state_dict() -> Dictionary:
 		# A02：此前遗漏、读档后会被重新随机或重置的状态
 		"father_trade": father_trade, "mother_temper": mother_temper,
 		"women_rank": women_rank, "scenes_done": scenes_done, "child_last": child_last,
-		"time_scale": time_scale, "slot": slot,
+		"time_scale": time_scale, "slot": slot, "month_frac": month_frac,
 		"parent_dead": parent_dead, "parent_death_year": parent_death_year,
 		"action_cooldown": action_cooldown, "last_settled_year": last_settled_year,
 		"facts": facts, "relations": relations, "actor_vitals": actor_vitals,
@@ -583,6 +583,7 @@ func _load_game() -> bool:
 		scenes_done = d["scenes_done"]
 	child_last = str(d.get("child_last", child_last))
 	time_scale = float(d.get("time_scale", time_scale))
+	month_frac = float(d.get("month_frac", month_frac))
 	if d.get("parent_dead") is Dictionary:
 		var pd: Dictionary = d["parent_dead"]
 		for k in pd.keys():
@@ -1140,6 +1141,123 @@ func _replay_digest(seed_value: int) -> String:
 		"pov%d" % parents_alive, "facts%d" % facts.size(), "story%d" % story.size(),
 	]
 	return "|".join(parts)
+
+
+func _run_continuity_a(seed_value: String, steps: int, out_path: String) -> void:
+	_continuity_start(int(seed_value))
+	_continuity_run(steps)
+	_save_game()
+	_continuity_dump(out_path, _continuity_snapshot())
+	get_tree().quit(0)
+
+
+func _run_continuity_b(steps: int, out0: String, out1: String) -> void:
+	# 新进程读档：不重新播种、不带 --fresh、不手工补字段
+	var ok := _load_game()
+	if not ok:
+		print("[CONT] load_failed")
+		get_tree().quit(2)
+		return
+	_continuity_dump(out0, _continuity_snapshot())
+	_continuity_run(steps)
+	_continuity_dump(out1, _continuity_snapshot())
+	get_tree().quit(0)
+
+
+func _run_continuity_c(seed_value: String, steps: int, steps2: int, out_path: String) -> void:
+	_continuity_start(int(seed_value))
+	_continuity_run(steps + steps2)
+	_continuity_dump(out_path, _continuity_snapshot())
+	get_tree().quit(0)
+
+
+func _continuity_start(seed_value: int) -> void:
+
+	# 固定起点：先定随机种子，再生成身份；清掉所有会跨进程比较的状态
+	ended = false
+	busy = false
+	_init_sim_rng(seed_value)
+	_init_identity()
+	events_enabled = true
+	boundary_log = []
+	event_instances = []
+	event_seq = 0
+	facts = []
+	fact_seq = 0
+	fact_floor = 0
+	last_event_fid = 0
+	last_boundary_fid = 0
+	relations = {}
+	action_cooldown = {}
+	parent_dead = {"father": false, "mother": false}
+	parent_death_year = {"father": 0, "mother": 0}
+	parents_alive = 2
+	last_settled_year = year - 1
+	scenes_done = {}
+	month_frac = 0.0
+	if not pov_state.has("child"):
+		pov_state["child"] = _capture_pov()
+
+
+func _continuity_run(steps: int) -> void:
+	# 固定命令序列：节令能过就过（选第一项），每月推进一格，每三月读一次书
+	for i in range(steps):
+		if ended:
+			return
+		busy = false
+		var sc := _due_scene()
+		if not sc.is_empty():
+			var sid := str(sc["id"])
+			var opts: Array = SCENE_OPTS.get(sid, [])
+			if not opts.is_empty():
+				_pick_scene_option(sid, str((opts[0] as Dictionary)["id"]))
+		if _month_index() % 3 == 0:
+			_on_action({"label": "cont_study", "months": 1, "gain": {"learning": 1}})
+		_advance_months(1)
+
+
+func _continuity_snapshot() -> Dictionary:
+	# 从运行中的权威状态导出，不复用存档字段清单
+	var actors := {}
+	for id in ["child", "father", "mother"]:
+		var who := str(id)
+		var v := _vitals_of(who)
+		actors[who] = {
+			"age": int(v["age"]), "health": float(v["health"]), "lifespan": int(v["lifespan"]),
+			"dead": _actor_is_dead(who),
+			"row": (pov_state.get(who, {}) as Dictionary).duplicate(true),
+		}
+	return {
+		"schema": SAVE_SCHEMA_VERSION,
+		"seed": sim_seed,
+		"pov": pov,
+		"year": year, "month": month, "month_frac": month_frac, "time_scale": time_scale,
+		"money": money,
+		"active": {"age": age, "health": health, "lifespan": lifespan, "learning": learning, "fame": fame},
+		"actors": actors,
+		"household": {"parents_alive": parents_alive, "married": married, "children": children, "land": land},
+		"relations": (relations as Dictionary).duplicate(true),
+		"cooldown": (action_cooldown as Dictionary).duplicate(true),
+		"queue": (event_instances as Array).duplicate(true),
+		"event_seq": event_seq,
+		"facts": (facts as Array).duplicate(true),
+		"fact_seq": fact_seq, "fact_floor": fact_floor,
+		"last_settled_year": last_settled_year,
+		"parent_dead": (parent_dead as Dictionary).duplicate(true),
+		"parent_death_year": (parent_death_year as Dictionary).duplicate(true),
+		"rng": {"world": str(rng_world.state), "actor": str(rng_actor.state), "birth": str(rng_birth.state)},
+		"scenes_done": (scenes_done as Dictionary).duplicate(true),
+	}
+
+
+func _continuity_dump(path: String, data: Dictionary) -> void:
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	if f == null:
+		print("[CONT] cannot_write ", path)
+		return
+	f.store_string(JSON.stringify(data, "  "))
+	f.close()
+	print("[CONT] wrote ", path, " bytes=", JSON.stringify(data).length())
 
 
 func _run_verify_smoke() -> void:
