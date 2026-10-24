@@ -287,8 +287,7 @@
                       "status":  "in_progress",
                       "owner":  null,
                       "evidence":  [
-                                       "docs/verification/content-validation.md",
-                                       "docs/verification/M2-01a.md"
+                                       "docs/verification/M2-01a-schema.md"
                                    ],
                       "commit_sha":  null,
                       "remote_sha":  null,

@@ -105,6 +105,7 @@ var women_rank := 0
 var month_frac := 0.0
 
 ## 存档格式版本：字段增删时递增，读档据此做迁移
+const ContentSchema := preload("res://scripts/core/content_schema.gd")
 const SAVE_SCHEMA_VERSION := 14
 var save_schema_seen := 0
 ## 读到更高版本的存档后置位：拒绝加载、拒绝覆盖
@@ -2715,6 +2716,39 @@ func _run_verify_smoke() -> void:
 	else:
 		fails.append("event_kill_stops_month")
 		print("[VERIFY] FAIL event_kill_stops_month in_month=", killed_in_month, " stopped=", stopped_after_death, " one_event=", reward_not_recorded)
+
+	# M2-01：内容 schema 能抓出坏数据，且线上数据本身是干净的
+	var schema_ok := DB.event_errors.is_empty()
+	var bad_events := [
+		{"id": "ok_one", "name": "好", "min_age": 1, "weight": 1, "cooldown": 0},
+		{"name": "缺id", "min_age": 1, "weight": 1, "cooldown": 0},
+		{"id": "dup", "name": "甲", "min_age": 1, "weight": 1, "cooldown": 0},
+		{"id": "dup", "name": "乙", "min_age": 1, "weight": 1, "cooldown": 0},
+		{"id": "bad_age", "name": "丙", "min_age": 40, "max_age": 10, "weight": 1, "cooldown": 0},
+		{"id": "bad_cond", "name": "丁", "min_age": 1, "weight": 1, "cooldown": 0, "cond": "on_moon"},
+		{"id": "bad_eff", "name": "戊", "min_age": 1, "weight": 1, "cooldown": 0, "effects": {"cash": 5}},
+		{"id": "bad_type", "name": "己", "min_age": "一", "weight": 1, "cooldown": 0},
+		{"id": "extra", "name": "庚", "min_age": 1, "weight": 1, "cooldown": 0, "mood": "happy"},
+	]
+	var errs: Array = ContentSchema.validate_events(bad_events, "data/events.json")
+	var codes: Array = []
+	var paths: Array = []
+	for e in errs:
+		codes.append(str((e as Dictionary)["code"]))
+		paths.append(str((e as Dictionary)["path"]))
+	var need := ["missing_field", "duplicate_id", "bad_age_range", "unknown_condition", "unknown_effect", "bad_type", "unknown_field"]
+	var all_found := true
+	for c in need:
+		if not codes.has(str(c)):
+			all_found = false
+	var path_precise: bool = paths.has("data/events.json[1].id") and paths.has("data/events.json[3].id")
+	var schema_good: bool = schema_ok and all_found and path_precise and errs.size() >= 7
+	if schema_good:
+		oks += 1
+		print("[VERIFY] PASS content_schema_validation codes=", codes.size(), " precise=", path_precise)
+	else:
+		fails.append("content_schema_validation")
+		print("[VERIFY] FAIL content_schema_validation shipped=", schema_ok, " found=", all_found, " precise=", path_precise, " codes=", codes)
 
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money

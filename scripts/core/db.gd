@@ -1,10 +1,12 @@
 extends Node
+const Schema := preload("res://scripts/core/content_schema.gd")
 ## 数据层：时代年号、出身、姓名，以及中文数字/纪年这些公用小工具。
 
 var era: Dictionary = {}
 var origins: Array = []
 var names: Dictionary = {}
 var events: Array = []
+var event_errors: Array = []
 var loaded := false
 
 
@@ -39,6 +41,9 @@ func load_all() -> void:
 	if names == null:
 		names = {}
 	events = _load_json("res://data/events.json")
+	event_errors = Schema.validate_events(events, "data/events.json")
+	if not event_errors.is_empty():
+		push_warning("[DB] events.json 校验失败：`n" + Schema.format_errors(event_errors))
 	if events == null:
 		events = []
 	print("[DB] 出身 %d 种，年号 %d 个，事件 %d 条" % [origins.size(), era.get("eras", []).size(), events.size()])
