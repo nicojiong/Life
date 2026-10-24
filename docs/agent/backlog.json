@@ -135,10 +135,11 @@
                                          "家庭财产与个人字段各有唯一所有者",
                                          "重建场景与换视角不改变关系、职业或身份"
                                      ],
-                      "status":  "todo",
+                      "status":  "in_progress",
                       "owner":  null,
                       "evidence":  [
-
+                                       "docs/verification/M1-01a.md",
+                                       "docs/tasks/M1-01.md"
                                    ],
                       "commit_sha":  null,
                       "remote_sha":  null,

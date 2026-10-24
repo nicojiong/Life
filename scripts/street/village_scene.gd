@@ -105,7 +105,7 @@ var women_rank := 0
 var month_frac := 0.0
 
 ## 存档格式版本：字段增删时递增，读档据此做迁移
-const SAVE_SCHEMA_VERSION := 5
+const SAVE_SCHEMA_VERSION := 6
 var save_schema_seen := 0
 ## A03：父母是否已故（保留人物记录，不用删除表示死亡）
 var parent_dead := {"father": false, "mother": false}
@@ -141,6 +141,8 @@ func _rndf(a: float, b: float) -> float:
 ## M1-03b：事实日志。每条记"什么时候、什么类型、由什么引起"，供墓志与调试追溯
 var facts: Array = []
 const FACT_CAP := 240
+## M1-01a：人物关系（id → attitude），由世界持有，不随场景重建消失
+var relations: Dictionary = {}
 
 
 func _log_fact(kind: String, cause: String, data: Dictionary = {}) -> void:
@@ -370,7 +372,7 @@ func _state_dict() -> Dictionary:
 		"time_scale": time_scale, "slot": slot,
 		"parent_dead": parent_dead, "parent_death_year": parent_death_year,
 		"action_cooldown": action_cooldown, "last_settled_year": last_settled_year,
-		"facts": facts,
+		"facts": facts, "relations": relations,
 		# RNG 的 64 位 seed/state 用十进制字符串，避免 JSON 精度丢失
 		"sim_seed": str(sim_seed), "sim_state": str(sim_rng.state),
 		"px": player.x, "py": player.y, "hour": hour,
@@ -528,6 +530,8 @@ func _load_game() -> bool:
 	last_settled_year = int(d.get("last_settled_year", last_settled_year))
 	if d.get("facts") is Array:
 		facts = d["facts"]
+	if d.get("relations") is Dictionary:
+		relations = d["relations"]
 	if d.has("sim_seed") and d.has("sim_state"):
 		sim_seed = int(str(d["sim_seed"]))
 		sim_rng.seed = sim_seed
@@ -1100,6 +1104,25 @@ func _run_verify_smoke() -> void:
 		print("[VERIFY] FAIL epitaph_uses_facts empty_ok=", no_trace,
 			" trace=", with_trace, " in_epitaph=", in_epitaph)
 	facts = []
+
+	# M1-01a：关系不随场景重建与存读档丢失
+	relations = {}
+	_set_att("li_shen", 25)
+	_spawn_npcs()
+	var att_after_rebuild := _get_att("li_shen")
+	_save_game()
+	relations = {}
+	_load_game()
+	var att_after_load := _get_att("li_shen")
+	if att_after_rebuild == 25 and att_after_load == 25:
+		oks += 1
+		print("[VERIFY] PASS relations_survive_rebuild rebuild=", att_after_rebuild,
+			" load=", att_after_load)
+	else:
+		fails.append("relations_survive_rebuild")
+		print("[VERIFY] FAIL relations_survive_rebuild rebuild=", att_after_rebuild,
+			" load=", att_after_load)
+	relations = {}
 
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
@@ -2432,7 +2455,7 @@ func _spawn_npcs() -> void:
 			"pos": home, "target": home,
 			"dir": 1.0, "speed": r.randf_range(14.0, 22.0),
 			"kind": int(cc["kind"]), "phase": r.randf() * 6.28,
-			"wait": r.randf_range(0.0, 2.0), "att": 0,
+			"wait": r.randf_range(0.0, 2.0), "att": _get_att(str(cc["id"])),
 			"build": BUILDS[absi(int(hash(str(cc["id"])))) % 4],
 		}
 		if cc.has("warm"):
@@ -2471,7 +2494,7 @@ func _spawn_special(id: String, npc_name: String, pos: Vector2, line: String) ->
 	npcs.append({
 		"id": id, "name": npc_name, "named": true, "line": line,
 		"home": pos, "pos": pos, "target": pos, "dir": 1.0,
-		"speed": 0.0, "kind": 0, "phase": 0.0, "wait": 0.0, "att": 0,
+		"speed": 0.0, "kind": 0, "phase": 0.0, "wait": 0.0, "att": _get_att(id),
 	})
 
 
@@ -2713,9 +2736,7 @@ func _on_dialog_choice(ch: Dictionary, id: String) -> void:
 	if ch.has("gain"):
 		_apply_gain(ch["gain"])
 	if ch.has("att"):
-		for i in range(npcs.size()):
-			if str(npcs[i].get("id", "")) == id:
-				npcs[i]["att"] = int(npcs[i].get("att", 0)) + int(ch["att"])
+		_set_att(id, _get_att(id) + int(ch["att"]))
 	if ch.has("special"):
 		_apply_special(str(ch["special"]))
 	panel.visible = false
@@ -2780,14 +2801,15 @@ func _dialog_line(n: Dictionary) -> String:
 
 
 func _set_att(id: String, v: int) -> void:
+	# M1-01a：关系存在 WorldState（relations），场景里的 NPC 只是显示
+	relations[id] = v
 	for i in range(npcs.size()):
 		if str(npcs[i].get("id", "")) == id:
 			npcs[i]["att"] = v
 
 
 func _get_att(id: String) -> int:
-	var n := _find_npc(id)
-	return int(n.get("att", 0)) if not n.is_empty() else 0
+	return int(relations.get(id, 0))
 
 
 func _meat_price() -> int:
