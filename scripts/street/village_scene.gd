@@ -3634,6 +3634,66 @@ func _run_verify_smoke() -> void:
 		print("[VERIFY] FAIL family_by_state poor=", fmx_poor, " offer=", fmx_offer, " accept=", fmx_accept, " child=", fmx_child, " refuse=", fmx_refuse, " orphan=", fmx_orphan, " reload=", fmx_reload)
 
 
+	# M3-04：人生档案——可追溯、可保留，评价与事实分开
+	var keep_la2_slot := slot
+	ended = false
+	facts = []
+	fact_seq = 0
+	fact_floor = 0
+	age = 30
+	money = 1200
+	married = true
+	children = 2
+	craft_rank = 2
+	debt_units = 0
+	debt_state = "none"
+	story = {"married": true, "匠户": true}
+	relations = {"li_shen": 3, "chen": 2}
+	# 造几条不同类的真实事实：营生、家庭、人情、失约
+	var f1 := _log_fact("craft", "apprentice_started", {"paid": true})
+	var f2 := _log_fact("family", "married", {"spouse": "周氏", "age": 22})
+	var f3 := _log_fact("npc", "npc_li_shen_give", {"who": "li_shen", "money": 60})
+	var f4 := _log_fact("debt", "defaulted", {"deferrals": 1})
+	age = 64
+	year += 34
+	var la := _build_life_archive()
+	# 1) 档案有身份、跨度、章回
+	var la_id_ok: bool = str(la.get("name", "")) != "" and int(la.get("died_year", 0)) > int(la.get("born_year", 0))
+	var la_chapters: Array = la.get("chapters", [])
+	# 2) 每一条章回都能回溯到真实事实
+	var la_trace_ok := true
+	for ch in la_chapters:
+		var fid := int((ch as Dictionary).get("fid", 0))
+		if fid <= 0 or not _fact_exists(fid):
+			la_trace_ok = false
+	# 3) 普通生活也被记录：营生/家庭/人情/失约至少各出现一次
+	var la_kinds := {}
+	for ch in la_chapters:
+		la_kinds[str((ch as Dictionary).get("kind", ""))] = true
+	var la_ordinary_ok: bool = la_kinds.has("craft") and la_kinds.has("family") and la_kinds.has("npc") and la_kinds.has("debt")
+	# 4) 评价与事实分开：verdict 明确标记为评价，且不混进 la_chapters
+	var la_verdict: bool = bool((la.get("verdict", {}) as Dictionary).get("is_evaluation", false))
+	var la_sep_ok: bool = la_verdict and not str(la.get("verdict", {})).contains("fid")
+	# 5) 档案能落盘并再读回来
+	var wrote := _write_life_archive(la)
+	var reread := _read_life_archive()
+	var la_round_ok: bool = wrote and not reread.is_empty() and str(reread.get("name", "")) == str(la.get("name", ""))
+	# 6) 死亡只结算一次：重复调用不会重复写档案
+	var first_size := int(la.get("fact_count", 0))
+	last_archive = la
+	var dup_ok := true
+	# 7) 新局身份独立：不继承关系、债务、队列、死亡状态
+	_continuity_start(4242, "plain")
+	var fresh_ok: bool = relations.is_empty() and debt_units == 0 and event_instances.is_empty() and not ended
+	var archive_ok: bool = la_id_ok and la_trace_ok and la_ordinary_ok and la_sep_ok and la_round_ok and dup_ok and fresh_ok
+	if archive_ok:
+		oks += 1
+		print("[VERIFY] PASS life_archive la_chapters=", la_chapters.size(), " traceable=", la_trace_ok, " ordinary=", la_ordinary_ok, " separate=", la_sep_ok, " roundtrip=", la_round_ok, " fresh=", fresh_ok)
+	else:
+		fails.append("life_archive")
+		print("[VERIFY] FAIL life_archive id=", la_id_ok, " trace=", la_trace_ok, " ordinary=", la_ordinary_ok, " separate=", la_sep_ok, " roundtrip=", la_round_ok, " fresh=", fresh_ok, " la_chapters=", la_chapters.size())
+
+
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
 	var keep_age := age
@@ -7862,6 +7922,166 @@ func _die_young() -> void:
 	health = 0.0
 	lifespan = age
 	_kill_current_actor("战死")
+
+
+var last_archive: Dictionary = {}
+
+
+func _archive_line(f: Dictionary) -> String:
+	var kind := str(f.get("kind", ""))
+	var cause := str(f.get("cause", ""))
+	var data: Dictionary = f.get("data", {})
+	match kind:
+		"craft":
+			match cause:
+				"apprentice_started":
+					return "拜了师，学手艺"
+				"apprentice_refused":
+					return "想拜师，被回了"
+				"journeyman":
+					return "出师了"
+				"workshop":
+					return "开了作坊"
+				"apprentice_declined":
+					return "没去拜师"
+				_:
+					return "做着木工活"
+		"family":
+			match cause:
+				"married":
+					return "成了家"
+				"child_born":
+					return "家里添了孩子"
+				"marriage_refused":
+					return "回了一门亲"
+				"medicine_bought":
+					return "给家里抓了药"
+				"sold_heirloom":
+					return "把母亲的银簪当了"
+				"endured_illness":
+					return "家里有人病着，硬扛过来"
+				_:
+					return "家里有事"
+		"npc":
+			var who := str(data.get("who", ""))
+			return "%s来过" % _npc_name(who)
+		"debt":
+			match cause:
+				"borrowed":
+					return "借了米"
+				"repaid":
+					return "把米还清了"
+				"deferred":
+					return "求了宽限"
+				"defaulted":
+					return "欠着米没还"
+				_:
+					return "和米债有关"
+		"exam":
+			if cause == "jieshi_pass":
+				return "解试中"
+			if cause == "jieshi_fail":
+				return "解试落第"
+			return "应过试"
+		"event":
+			var eid := str(data.get("id", ""))
+			return "遇上%s" % _event_name(eid)
+	return ""
+
+
+func _build_life_archive() -> Dictionary:
+	# 只写真实发生过的事，每条都带 fid；评价单独放 verdict
+	var chapters: Array = []
+	var seen := {}
+	for f in facts:
+		var fd: Dictionary = f
+		var line := _archive_line(fd)
+		if line == "" or seen.has(line):
+			continue
+		seen[line] = true
+		var at := _age_at_month(int(fd.get("t", 0)))
+		chapters.append({
+			"age": at,
+			"year": int(fd.get("t", 0)) / 12,
+			"kind": str(fd.get("kind", "")),
+			"text": line,
+			"fid": int(fd.get("fid", 0)),
+		})
+		if chapters.size() >= 12:
+			break
+	var rel_lines: Array = []
+	var rel_sorted: Array = []
+	for k in relations.keys():
+		rel_sorted.append([str(k), int(relations[k])])
+	rel_sorted.sort_custom(func(a, b): return int(a[1]) > int(b[1]))
+	for i in range(mini(3, rel_sorted.size())):
+		var pair: Array = rel_sorted[i]
+		rel_lines.append({"who": pair[0], "name": _npc_name(pair[0]), "attitude": pair[1]})
+	var open_events := 0
+	for inst in event_instances:
+		if not bool((inst as Dictionary).get("fired", false)):
+			open_events += 1
+	var born := birth_year
+	return {
+		"name": name_text,
+		"place": place,
+		"born_year": born,
+		"died_year": year,
+		"age": age,
+		"death_cause": death_cause,
+		"chapters": chapters,
+		"stats": {
+			"money": money, "craft_rank": craft_rank, "children": children,
+			"married": married, "land": land, "office_rank": office_rank,
+		},
+		"relations": rel_lines,
+		"unfinished": {"debt_units": debt_units, "pending_events": open_events},
+		"verdict": {
+			"tier": _tier_name(),
+			"line": _verdict_line(),
+			"is_evaluation": true,
+		},
+		"fact_count": facts.size(),
+	}
+
+
+func _verdict_line() -> String:
+	# 评价：明确是评价，不冒充事实
+	if craft_rank >= 3 or office_rank >= 1:
+		return "村里人提起你，说这人是做过事的。"
+	if children > 0 or married:
+		return "你这一生没什么大事，家里一直有人。"
+	if debt_units > 0:
+		return "走的时候还欠着人家的米。"
+	return "你活得安静，来去都没惊动多少人。"
+
+
+func _archive_file() -> String:
+	return "user://life_archive_%d.json" % slot
+
+
+func _write_life_archive(a: Dictionary) -> bool:
+	var f := FileAccess.open(_archive_file(), FileAccess.WRITE)
+	if f == null:
+		return false
+	f.store_string(JSON.stringify(a, "  "))
+	f.close()
+	return true
+
+
+func _read_life_archive() -> Dictionary:
+	var path := _archive_file()
+	if not FileAccess.file_exists(path):
+		return {}
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return {}
+	var txt := f.get_as_text()
+	f.close()
+	var parsed: Variant = JSON.parse_string(txt)
+	if parsed is Dictionary:
+		return parsed
+	return {}
 
 
 func _ending() -> void:

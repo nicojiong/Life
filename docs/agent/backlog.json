@@ -522,10 +522,10 @@
                                          "普通生活有具体回望，不以未考进士判定无意义",
                                          "死后不接受活人命令；新局world_id不复用旧局状态"
                                      ],
-                      "status":  "todo",
+                      "status":  "in_progress",
                       "owner":  null,
                       "evidence":  [
-
+                                       "docs/verification/M3-04a-archive.md"
                                    ],
                       "commit_sha":  null,
                       "remote_sha":  null,
