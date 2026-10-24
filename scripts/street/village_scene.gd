@@ -1777,10 +1777,12 @@ func _run_verify_smoke() -> void:
 	var keep_month := month
 	year = 1053
 	month = 4
-	_log_fact("event", "opportunity", {"id": "drought"})
+	var ev_fid_story := _log_fact("event", "opportunity", {"id": "drought"})
+	_log_fact("consequence", "event_effect", {"id": "drought", "money": -700, "land": -1}, ev_fid_story)
 	var lines_story := _story_lines()
-	var expected_line := "十三岁那年，旱。"
-	var story_ok: bool = lines_story.size() == 1 and str(lines_story[0]) == expected_line
+	var line_text := str(lines_story[0]) if lines_story.size() == 1 else ""
+	var story_ok: bool = lines_story.size() == 1 and line_text.begins_with("十三岁那年，旱") \
+		and line_text.find("亩田") >= 0
 	# 空日志时不应编造句子
 	facts = []
 	var lines_empty := _story_lines()
@@ -4987,7 +4989,15 @@ func _drain_due_events() -> int:
 			{"id": str(inst["id"]), "sid": int(inst["sid"])}, int(inst.get("cause_fid", 0)))
 		last_event_fid = ev_fid
 		inst["fid"] = ev_fid
+		# M2-03c：事件带来的实际变化单独记一条，指向事件本身
+		var before_money := money
+		var before_land := land
 		_apply_event(str(inst["id"]))
+		var d_money := money - before_money
+		var d_land := land - before_land
+		if d_money != 0 or d_land != 0:
+			_log_fact("consequence", "event_effect",
+				{"id": str(inst["id"]), "money": d_money, "land": d_land}, ev_fid)
 		fired += 1
 	var alive_list: Array = []
 	for inst in event_instances:
@@ -5245,6 +5255,32 @@ func _age_at_month(t: int) -> int:
 	return int(t / 12) - birth_year
 
 
+func _consequence_of(fid: int) -> Dictionary:
+	for f in facts:
+		var fd: Dictionary = f
+		if str(fd.get("kind", "")) == "consequence" and int(fd.get("cause_fid", 0)) == fid:
+			return fd
+	return {}
+
+
+func _consequence_phrase(cq: Dictionary) -> String:
+	if cq.is_empty():
+		return ""
+	# 后果的数值存在 data 里，不在事实顶层
+	var cq_data: Dictionary = cq.get("data", {})
+	var d_land := int(cq_data.get("land", 0))
+	var d_money := int(cq_data.get("money", 0))
+	if d_land < 0:
+		return "，家里卖掉%d亩田" % -d_land
+	if d_land > 0:
+		return "，家里添了%d亩田" % d_land
+	if d_money < 0:
+		return "，贴进去%s文" % DB.cn(-d_money)
+	if d_money > 0:
+		return "，进项%s文" % DB.cn(d_money)
+	return ""
+
+
 func _story_lines() -> Array:
 	# M2-03b：用事实日志写人话。只写真实发生过的，且越晚越靠后
 	var lines: Array = []
@@ -5259,7 +5295,8 @@ func _story_lines() -> Array:
 			continue
 		if kind == "event":
 			var eid := str((fd.get("data", {}) as Dictionary).get("id", ""))
-			lines.append("%s岁那年，%s。" % [DB.cn(age_at), _event_name(eid)])
+			var cq := _consequence_of(int(fd.get("fid", 0)))
+			lines.append("%s岁那年，%s%s。" % [DB.cn(age_at), _event_name(eid), _consequence_phrase(cq)])
 			picked += 1
 		elif kind == "exam":
 			var cause := str(fd.get("cause", ""))

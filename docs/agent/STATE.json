@@ -11,7 +11,7 @@
     "remote_mutations_performed":  true,
     "current_task":  "M2-03",
     "next_task":  "M1-04",
-    "task_status":  "M2-03b-pushed",
+    "task_status":  "M2-03c-pushed",
     "branch":  "16 个 agent/* 堆叠分支（见 docs/DELIVERY_M1.md）",
     "base_sha":  "bf0846f1c20cbcf4dd0cf5f5707b0cf1c88e12cb",
     "commit_sha":  "4466c07634746641983a8522d06997e3b5e61d03",
@@ -24,5 +24,5 @@
                      "docs/BASELINE.md",
                      "docs/tasks/M0-01.md"
                  ],
-    "next_step":  "M2-04 分阶段自主权；或让因果链参与造句"
+    "next_step":  "M2-04 分阶段自主权"
 }
