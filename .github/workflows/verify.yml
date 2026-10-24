@@ -1,9 +1,7 @@
 name: verify
 
-# 隔离验证入口：与本地 tools/verify.ps1 同一套断言
-# 注意：本工作流由 Agent 提交，但当前开发机没有 CI runner 与 gh CLI，
-#       **尚未在 GitHub Actions 上真实运行过**。首次运行可能因引擎下载地址或
-#       PowerShell 在 Linux 上的行为需要调整，见 docs/verification/CI.md。
+# 隔离验证入口：与本地 tools/verify.ps1 同一套断言。
+# 失败时先打印日志摘要（会成为 GitHub 注解），再上传 verify-artifacts/ 便于下载。
 
 on:
   push:
@@ -29,13 +27,32 @@ jobs:
           /tmp/godot/Godot_v4.7.2-stable_linux.x86_64 --version
 
       - name: Run isolated verification
-        run: pwsh -NoProfile -File tools/verify.ps1 -GodotPath /tmp/godot/Godot_v4.7.2-stable_linux.x86_64
+        run: |
+          pwsh -NoProfile -File tools/verify.ps1 \
+            -GodotPath /tmp/godot/Godot_v4.7.2-stable_linux.x86_64 \
+            -ExpectedAssertions 25 \
+            -ArtifactDir "$GITHUB_WORKSPACE/verify-artifacts"
 
-      - name: Upload log on failure
-        if: failure()
+      - name: Show verification log
+        if: always()
+        run: |
+          LOG="$GITHUB_WORKSPACE/verify-artifacts/run.log"
+          if [ -f "$LOG" ]; then
+            echo "----- verify log (last 60 lines) -----"
+            tail -n 60 "$LOG"
+            echo "--------------------------------------"
+            # 关键行转成注解，公开仓库无需登录即可读到失败原因
+            grep -E '\[VERIFY\] FAIL|\[verify\] FAIL|\[SAVE\] refused|ERROR' "$LOG" | head -n 20 | while IFS= read -r line; do
+              echo "::error::${line}"
+            done
+          else
+            echo "::error::verify-artifacts/run.log 不存在，脚本可能未能启动"
+          fi
+
+      - name: Upload verification artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: verify-log
-          path: |
-            /tmp/life-verify-*/run.log
+          name: verify-artifacts
+          path: verify-artifacts/
           if-no-files-found: warn

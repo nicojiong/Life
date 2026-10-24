@@ -10,3 +10,7 @@ run.err.log
 
 # 临时调试图
 docs/shots/_*.png
+
+# 验证产物
+verify-artifacts/
+
