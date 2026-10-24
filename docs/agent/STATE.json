@@ -11,7 +11,7 @@
     "remote_mutations_performed":  true,
     "current_task":  "连续运行 vs 真实退出重载续跑",
     "next_task":  "连续运行 vs 真实退出重载续跑",
-    "task_status":  "M2-01c-pushed",
+    "task_status":  "M2-01d-pushed",
     "branch":  "agent/M1-ci-workflow",
     "base_sha":  "bf0846f1c20cbcf4dd0cf5f5707b0cf1c88e12cb",
     "commit_sha":  "684d6a24a825d3b3c3581032dfdb2928e954a733",
@@ -21,8 +21,8 @@
     "integrated_sha":  null,
     "blocked_reason":  "仍有限制：只有 Linux CI；数据文件无 schema 校验；无真人试玩。PR 已存在（#1, Draft），不再阻塞。",
     "evidence":  [
-                     "docs/verification/M2-01b.md",
-                     "docs/verification/M2-01c.md"
+                     "docs/verification/M2-01c.md",
+                     "docs/verification/M2-01d.md"
                  ],
-    "next_step":  "连续运行 vs 真实退出重载续跑的状态对比"
+    "next_step":  "跨进程续跑验收（M1-05 子任务）；随后阶段集成评审"
 }

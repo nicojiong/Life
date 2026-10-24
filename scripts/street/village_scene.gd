@@ -2304,10 +2304,17 @@ func _run_verify_smoke() -> void:
 	_enqueue_event("drought", "test", _month_index(), 0, "child", "cancel")
 	_drain_due_events()
 	var child_dead: bool = _actor_is_dead("child")
+	# 孩子已死：把事件排给已故父亲并要求转移——必须被拒绝，且资源不变
+	parent_dead["father"] = true
+	var money_before_refuse2 := money
+	var child_hp_refuse := float(_vitals_of("child")["health"])
 	_enqueue_event("plague", "test", _month_index(), 0, "father", "transfer")
 	_drain_due_events()
-	var transfer_refused := _count_facts("event_transferred") == 0
+	var transfer_refused := _count_facts("event_transferred") == 0 \
+		and money == money_before_refuse2 \
+		and is_equal_approx(float(_vitals_of("child")["health"]), child_hp_refuse)
 	var transfer_ok: bool = child_dead and transfer_refused
+	parent_dead["father"] = false
 	ended = false
 	if pov != "child":
 		_switch_pov("child")
@@ -2335,6 +2342,130 @@ func _run_verify_smoke() -> void:
 	else:
 		fails.append("event_boundaries")
 		print("[VERIFY] FAIL event_boundaries cancel=", cancel_ok, " transfer=", transfer_ok, " legacy=", unknown_ok, " dead=", child_dead)
+
+	# M2-01d：死亡结算收尾——事件致死、跨年到寿、父母只结算一次、转移一次且可拒绝
+	var keep_d_seed := sim_seed
+	var keep_d_inst: Array = (event_instances as Array).duplicate(true)
+	var keep_d_seq := event_seq
+	var keep_d_facts: Array = (facts as Array).duplicate(true)
+	var keep_d_pov := pov
+	var keep_d_dead: Dictionary = (parent_dead as Dictionary).duplicate(true)
+	var keep_d_yy: Dictionary = (parent_death_year as Dictionary).duplicate(true)
+	var keep_d_alive := parents_alive
+	var keep_d_ended := ended
+	var keep_d_money := money
+	var keep_d_age := age
+	var keep_d_life := lifespan
+	var keep_d_hp := health
+	var keep_d_vitals: Dictionary = (actor_vitals as Dictionary).duplicate(true)
+	var keep_d_events := events_enabled
+	events_enabled = false
+	ended = false
+	parent_dead["father"] = false
+	parent_dead["mother"] = false
+	parents_alive = 2
+	# 1) 操控父亲，孩子（非当前视角）被事件扣到 0 健康：必须进入孩子结局
+	if pov != "child":
+		_switch_pov("child")
+	_switch_pov("father")
+	age = 30
+	actor_vitals["child"] = {"age": 10, "health": 1.0, "lifespan": 60}
+	event_instances = []
+	event_seq = 0
+	_enqueue_event("drought", "test", _month_index(), 0, "child", "cancel")
+	_drain_due_events()
+	var child_killed: bool = ended
+	# 2) 非当前孩子跨年到寿：走正常 _advance_months 路径结束人生
+	ended = false
+	if pov != "father":
+		_switch_pov("father")
+	age = 30
+	health = 80.0
+	lifespan = 70
+	actor_vitals["child"] = {"age": 59, "health": 80.0, "lifespan": 60}
+	last_settled_year = year
+	_advance_months(12)
+	var child_aged_out: bool = ended
+	# 3) 父母在年边界同一年去世：各结算一次、人数只减两
+	ended = false
+	parent_dead["father"] = false
+	parent_dead["mother"] = false
+	parents_alive = 2
+	if pov != "child":
+		_switch_pov("child")
+	age = 30
+	health = 80.0
+	lifespan = 90
+	actor_vitals["father"] = {"age": 70, "health": 80.0, "lifespan": 70}
+	actor_vitals["mother"] = {"age": 70, "health": 80.0, "lifespan": 70}
+	parents_alive = 2
+	last_settled_year = year
+	_advance_months(12)
+	var kin_once: bool = bool(parent_dead["father"]) and bool(parent_dead["mother"]) and parents_alive == 0
+	# 4) 已故父亲的事件转给活着的孩子，事实里保留原主体与实际承受者
+	ended = false
+	parent_dead["father"] = true
+	actor_vitals["child"] = {"age": 10, "health": 80.0, "lifespan": 60}
+	if pov != "child":
+		_switch_pov("child")
+	facts = []
+	fact_seq = 0
+	event_instances = []
+	event_seq = 0
+	var hp_before_transfer := float(_vitals_of("child")["health"])
+	_enqueue_event("drought", "test", _month_index(), 0, "father", "transfer")
+	_drain_due_events()
+	var hp_after_transfer := float(_vitals_of("child")["health"])
+	var transfer_fact: Dictionary = {}
+	for f in facts:
+		var fd: Dictionary = f
+		if str(fd.get("kind", "")) == "event":
+			transfer_fact = fd
+	var tf_data: Dictionary = transfer_fact.get("data", {})
+	var transfer_applied: bool = hp_after_transfer < hp_before_transfer \
+		and str(tf_data.get("from", "")) == "father" \
+		and str(tf_data.get("to", "")) == "child" \
+		and str(tf_data.get("result", "")) == "transferred"
+	# 5) 孩子已死时拒绝转移：个人与家庭资源都不变
+	var money_before_refuse := money
+	health = 0.0
+	_switch_pov("child")
+	_settle_actor_death("child", "test")
+	ended = true
+	if pov != "father":
+		_switch_pov("father")
+	actor_vitals["child"] = {"age": 10, "health": 0.0, "lifespan": 60}
+	var hp_before_refuse := float(_vitals_of("child")["health"])
+	event_instances = []
+	event_seq = 0
+	_enqueue_event("drought", "test", _month_index(), 0, "father", "transfer")
+	_drain_due_events()
+	var refuse_ok: bool = money == money_before_refuse \
+		and is_equal_approx(float(_vitals_of("child")["health"]), hp_before_refuse)
+	ended = keep_d_ended
+	parent_dead = keep_d_dead
+	parent_death_year = keep_d_yy
+	parents_alive = keep_d_alive
+	money = keep_d_money
+	age = keep_d_age
+	lifespan = keep_d_life
+	health = keep_d_hp
+	actor_vitals = keep_d_vitals
+	event_instances = keep_d_inst
+	event_seq = keep_d_seq
+	facts = keep_d_facts
+	fact_seq = keep_d_facts.size()
+	events_enabled = keep_d_events
+	sim_seed = keep_d_seed
+	if pov != keep_d_pov:
+		_switch_pov(keep_d_pov)
+	var death_settle_ok: bool = child_killed and child_aged_out and kin_once and transfer_applied and refuse_ok
+	if death_settle_ok:
+		oks += 1
+		print("[VERIFY] PASS death_settlement killed=", child_killed, " aged=", child_aged_out, " kin=", kin_once, " transfer=", transfer_ok, " refuse=", refuse_ok)
+	else:
+		fails.append("death_settlement")
+		print("[VERIFY] FAIL death_settlement killed=", child_killed, " aged=", child_aged_out, " kin=", kin_once, " transfer=", transfer_ok, " refuse=", refuse_ok)
 
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
@@ -5372,20 +5503,9 @@ func _on_new_year() -> void:
 		var st_hp := _decay_health(st_age, float(st.get("health", 100.0)))
 		st["health"] = st_hp
 		var st_life := int(st.get("lifespan", 100))
-		if kid in ["father", "mother"] and not bool(parent_dead.get(kid, false)) \
-				and (st_age >= st_life or st_hp <= 0.0):
-			parent_dead[kid] = true
-			parent_death_year[kid] = year
-			if not boundary_log.has("death"):
-				boundary_log.append("death")
-			parents_alive = maxi(0, parents_alive - 1)
-			_toast("%s也走了，就在这一年。" % (father_name if kid == "father" else mother_name),
-				Color(0.62, 0.24, 0.18))
-			_spawn_npcs()
-	# 非当前视角的孩子健康归零，同样要走死亡结算（否则读档后仍被当成活人）
-	if not ended and pov != "child" and float(_vitals_of("child")["health"]) <= 0.0:
-		boundary_log.append("death_active")
-		_settle_actor_death("child", "health")
+	# 家人（含非当前视角的孩子）统一判死；当前视角的死留到 settle 之前按 death_active 处理
+	_kin_death_pass()
+	if ended:
 		return
 	if health <= 0.0:
 		lifespan = age
@@ -5585,12 +5705,22 @@ func _drain_due_events() -> int:
 		# M2-01c：先结算，再按结果写不同种类的事实——取消/转移不算"真的发生过"
 		var before_money := money
 		var before_land := land
-		var status := _apply_event_for(str(inst.get("target", "")), str(inst["id"]),
+		var from_target := str(inst.get("target", ""))
+		var status := _apply_event_for(from_target, str(inst["id"]),
 			str(inst.get("policy", "cancel")))
 		var ev_fid := 0
-		if status == "applied" or status == "transferred":
+		if status == "transferred":
+			ev_fid = _log_fact("event", str(inst.get("cause", "unknown")),
+				{"id": str(inst["id"]), "sid": int(inst["sid"]),
+				"from": from_target, "to": "child", "result": "transferred"},
+				int(inst.get("cause_fid", 0)))
+			last_event_fid = ev_fid
+			inst["fid"] = ev_fid
+		elif status == "applied":
 			ev_fid = _log_fact("event", str(inst.get("cause", "unknown")),
 				{"id": str(inst["id"]), "sid": int(inst["sid"])}, int(inst.get("cause_fid", 0)))
+			last_event_fid = ev_fid
+			inst["fid"] = ev_fid
 			last_event_fid = ev_fid
 			inst["fid"] = ev_fid
 		else:
@@ -5679,12 +5809,16 @@ func _apply_event_effects(def: Dictionary) -> void:
 		_toast(txt, Color(0.62, 0.24, 0.18) if bad_news else Color(0.30, 0.42, 0.22))
 
 
+func _actor_can_die(who: String) -> bool:
+	# 达到死亡条件：健康归零或年龄到寿。和"是否已结算"是两件事
+	var v := _vitals_of(who)
+	return float(v["health"]) <= 0.0 or int(v["age"]) >= int(v["lifespan"])
+
+
 func _actor_is_dead(who: String) -> bool:
+	# 已经完成死亡结算
 	if who == "child":
-		if ended:
-			return true
-		# 健康归零即视为已死，即便还没走到死亡结算（避免"活的死人"接走转移事件）
-		return float(_vitals_of("child")["health"]) <= 0.0
+		return ended
 	return bool(parent_dead.get(who, false))
 
 
@@ -5695,8 +5829,9 @@ func _apply_event_for(who: String, id: String, policy: String) -> String:
 		# 旧档没有记录主体：不假装恢复，也不静默交给孩子
 		return "cancelled_unknown_target"
 	var target := who
-	if _actor_is_dead(target):
-		if policy == "transfer" and not _actor_is_dead("child"):
+	var child_available: bool = not _actor_is_dead("child") and not _actor_can_die("child")
+	if _actor_is_dead(target) or _actor_can_die(target):
+		if policy == "transfer" and child_available:
 			_apply_event_to_actor("child", id)
 			return "transferred"
 		return "cancelled_dead_target"
@@ -5736,13 +5871,29 @@ func _check_actor_deaths() -> void:
 	for id in ["child", "father", "mother"]:
 		if ended:
 			return
-		if _actor_is_dead(str(id)):
+		var who := str(id)
+		if _actor_is_dead(who):
 			continue
-		var v := _vitals_of(str(id))
-		if float(v["health"]) <= 0.0:
-			_settle_actor_death(str(id), "health")
-		elif int(v["age"]) >= int(v["lifespan"]):
-			_settle_actor_death(str(id), "old_age")
+		if not _actor_can_die(who):
+			continue
+		var v := _vitals_of(who)
+		_settle_actor_death(who, "old_age" if int(v["age"]) >= int(v["lifespan"]) else "health")
+
+
+func _kin_death_pass() -> void:
+	# 年边界：先结算不在当前视角的家人（含孩子），当前视角的死在 settle 之前单独处理
+	for id in ["father", "mother", "child"]:
+		var who := str(id)
+		if who == pov or _actor_is_dead(who):
+			continue
+		if not _actor_can_die(who):
+			continue
+		if not boundary_log.has("death"):
+			boundary_log.append("death")
+		var v := _vitals_of(who)
+		_settle_actor_death(who, "old_age" if int(v["age"]) >= int(v["lifespan"]) else "health")
+		if ended:
+			return
 
 
 func _apply_event_to_inactive(who: String, id: String) -> void:
