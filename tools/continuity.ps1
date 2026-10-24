@@ -130,7 +130,12 @@ function New-ProjectCopy([string]$name) {
   $dir = Join-Path $tempRoot $name
   New-Item -ItemType Directory -Path $dir | Out-Null
   $proj = Join-Path $dir "project"
-  robocopy $root $proj /E /XD .git .github verify-artifacts "$([IO.Path]::GetFileName($tempRoot))" /NFL /NDL /NJH /NJS /NP | Out-Null
+  New-Item -ItemType Directory -Path $proj -Force | Out-Null
+  $skip = @('.git', '.github', 'verify-artifacts')
+  foreach ($item in Get-ChildItem -Path $root -Force) {
+    if ($skip -contains $item.Name) { continue }
+    Copy-Item -Path $item.FullName -Destination $proj -Recurse -Force
+  }
   $cfg = Join-Path $proj "project.godot"
   $text = [System.IO.File]::ReadAllText($cfg, [System.Text.UTF8Encoding]::new($false))
   $text = [regex]::Replace($text, 'config/name="[^"]*"', ('config/name="LifeCont-' + $name + '"'))
@@ -139,7 +144,7 @@ function New-ProjectCopy([string]$name) {
 }
 
 function Get-UserDir([string]$name) {
-  if ($IsLinux -or $IsMacOS) { return (Join-Path $HOME (".local/share/godot/app_userdata/LifeCont-$name")) }
+  if ($IsLinux -or $IsMacOS) { return (Join-Path $HOME ".local/share/godot/app_userdata/LifeCont-$name") }
   return (Join-Path $env:APPDATA "Godot\app_userdata\LifeCont-$name")
 }
 
