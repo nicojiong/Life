@@ -213,10 +213,11 @@
                                          "死亡父母不补生；旧档缺失信息按迁移策略标记而不假装恢复",
                                          "写入中断或损坏可回退备份；RNG的64位seed/state用十进制字符串"
                                      ],
-                      "status":  "todo",
+                      "status":  "in_progress",
                       "owner":  null,
                       "evidence":  [
-
+                                       "docs/verification/M1-04a.md",
+                                       "docs/tasks/M1-04.md"
                                    ],
                       "commit_sha":  null,
                       "remote_sha":  null,

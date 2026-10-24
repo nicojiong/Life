@@ -104,6 +104,10 @@ var speed_btn: Button = null
 var women_rank := 0
 var month_frac := 0.0
 
+## 存档格式版本：字段增删时递增，读档据此做迁移
+const SAVE_SCHEMA_VERSION := 2
+var save_schema_seen := 0
+
 var _re_time := RegEx.new()
 
 ## 切换视角时要保存/恢复的字段（钱是全家共用的，不在其中）
@@ -300,6 +304,7 @@ func _ready() -> void:
 
 func _state_dict() -> Dictionary:
 	return {
+		"schema_version": SAVE_SCHEMA_VERSION,
 		"name": name_text, "place": place, "year": year, "month": month, "age": age,
 		"money": money, "learning": learning, "craft": craft, "fame": fame,
 		"health": health, "lifespan": lifespan,
@@ -316,6 +321,10 @@ func _state_dict() -> Dictionary:
 		"can_walk": can_walk,
 		"office_rank": office_rank, "gov_merit": gov_merit, "scandal": scandal, "county": county,
 		"milestones": milestones,
+		# A02：此前遗漏、读档后会被重新随机或重置的状态
+		"father_trade": father_trade, "mother_temper": mother_temper,
+		"women_rank": women_rank, "scenes_done": scenes_done, "child_last": child_last,
+		"time_scale": time_scale, "slot": slot,
 		"px": player.x, "py": player.y, "hour": hour,
 		"birth_year": birth_year, "father_name": father_name, "mother_name": mother_name,
 	}
@@ -412,6 +421,15 @@ func _load_game() -> bool:
 	birth_year = int(d.get("birth_year", birth_year))
 	father_name = str(d.get("father_name", father_name))
 	mother_name = str(d.get("mother_name", mother_name))
+	# A02：这些字段以前不存，读档后会变回新随机值或被重置
+	father_trade = str(d.get("father_trade", father_trade))
+	mother_temper = str(d.get("mother_temper", mother_temper))
+	women_rank = int(d.get("women_rank", women_rank))
+	if d.get("scenes_done") is Dictionary:
+		scenes_done = d["scenes_done"]
+	child_last = str(d.get("child_last", child_last))
+	time_scale = float(d.get("time_scale", time_scale))
+	save_schema_seen = int(d.get("schema_version", 1))
 	return true
 
 
@@ -734,6 +752,43 @@ func _run_verify_smoke() -> void:
 	else:
 		fails.append("npc_ids_unique")
 		print("[VERIFY] FAIL npc_ids_unique duplicate=", dup_id)
+
+	# A02：完整存档往返（父亲行当/母亲性情/妇业/节令/流速/童年去重）
+	var keep := {
+		"ft": father_trade, "mt": mother_temper, "wr": women_rank,
+		"cl": child_last, "ts": time_scale,
+		"sd": (scenes_done as Dictionary).duplicate(true),
+	}
+	father_trade = "匠"
+	mother_temper = "严"
+	women_rank = 3
+	child_last = "wood"
+	time_scale = 600.0
+	scenes_done = {"1046_qingming": true}
+	_save_game()
+	father_trade = "农"
+	mother_temper = "和"
+	women_rank = 0
+	child_last = ""
+	time_scale = 1.0
+	scenes_done = {}
+	save_schema_seen = 0
+	var ok_full := _load_game()
+	if ok_full and father_trade == "匠" and mother_temper == "严" and women_rank == 3 \
+			and child_last == "wood" and is_equal_approx(time_scale, 600.0) \
+			and scenes_done.has("1046_qingming") and save_schema_seen == SAVE_SCHEMA_VERSION:
+		oks += 1
+		print("[VERIFY] PASS save_roundtrip_full schema=", save_schema_seen)
+	else:
+		fails.append("save_roundtrip_full")
+		print("[VERIFY] FAIL save_roundtrip_full ", father_trade, "/", mother_temper, "/",
+			women_rank, "/", child_last, "/", time_scale, "/", scenes_done, "/", save_schema_seen)
+	father_trade = str(keep["ft"])
+	mother_temper = str(keep["mt"])
+	women_rank = int(keep["wr"])
+	child_last = str(keep["cl"])
+	time_scale = float(keep["ts"])
+	scenes_done = (keep["sd"] as Dictionary).duplicate(true)
 
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
