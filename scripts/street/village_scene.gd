@@ -248,22 +248,8 @@ const SAVE_DIR := "user://"
 
 ## 随机事件池：每年 32% 概率触发一条，按年龄与身份筛选
 ## M2-02：机会定义。weight 决定被抽中的相对概率，cooldown 是最短复发间隔（月）
-const EVENTS := [
-	{"id": "drought", "name": "旱", "min_age": 8, "weight": 3, "cooldown": 60},
-	{"id": "flood", "name": "水", "min_age": 8, "weight": 3, "cooldown": 60},
-	{"id": "levy", "name": "加赋", "min_age": 12, "weight": 4, "cooldown": 24},
-	{"id": "thieves", "name": "盗", "min_age": 12, "weight": 2, "cooldown": 36},
-	{"id": "plague", "name": "疫", "min_age": 10, "weight": 1, "cooldown": 120},
-	{"id": "suit", "name": "讼", "min_age": 16, "weight": 3, "cooldown": 24},
-	{"id": "wedding", "name": "婚嫁", "min_age": 10, "weight": 3, "cooldown": 36},
-	{"id": "harvest", "name": "丰年", "min_age": 16, "cond": "farm", "weight": 4, "cooldown": 12},
-	{"id": "reward", "name": "旌表", "min_age": 20, "cond": "famous", "weight": 2, "cooldown": 36},
-	{"id": "school", "name": "入学", "min_age": 25, "cond": "parent", "weight": 2, "cooldown": 60},
-	{"id": "rash", "name": "疹", "min_age": 1, "max_age": 6, "weight": 2, "cooldown": 12},
-	{"id": "riverfall", "name": "落水", "min_age": 2, "max_age": 7, "weight": 2, "cooldown": 12},
-	{"id": "find_coin", "name": "拾钱", "min_age": 3, "max_age": 8, "weight": 2, "cooldown": 12},
-	{"id": "quarrel", "name": "口角", "min_age": 3, "max_age": 9, "weight": 2, "cooldown": 12},
-]
+## M3-01：事件定义搬进 data/events.json，运行时装入；缺文件时为空并会被 content_ids_valid 抓住
+var EVENTS: Array = []
 
 ## 各地点允许去的最小年龄；太小的时候只能在家
 ## 0-6 岁：不由玩家选，由父母带着过。每年抽一条。
@@ -383,6 +369,9 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	# 模拟随机流先于身份生成初始化：同种子得到同一份出身与一生
 	var boot := int(Time.get_ticks_usec()) ^ randi()
+	EVENTS = DB.events.duplicate(true)
+	if EVENTS.is_empty():
+		push_warning("[DB] events.json 为空，年度事件不会发生")
 	_init_sim_rng(boot)
 	_init_identity()
 	var resumed := _load_game()
@@ -900,6 +889,8 @@ const OCCUPATION_FLAGS := ["农家", "匠人", "商贾", "商人", "军户", "�
 func _content_issues() -> Array:
 	# M2 地基：内容 ID 与必填字段的静态校验，出错时给断言一个明确的名字
 	var issues: Array = []
+	if EVENTS.is_empty():
+		issues.append("events_missing")
 	var seen_ev := {}
 	for ev in EVENTS:
 		var eid := str((ev as Dictionary).get("id", ""))

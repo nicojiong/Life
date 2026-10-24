@@ -1,0 +1,16 @@
+[
+  {"id": "drought",   "name": "旱",   "min_age": 8,  "weight": 3, "cooldown": 60},
+  {"id": "flood",     "name": "水",   "min_age": 8,  "weight": 3, "cooldown": 60},
+  {"id": "levy",      "name": "加赋", "min_age": 12, "weight": 4, "cooldown": 24},
+  {"id": "thieves",   "name": "盗",   "min_age": 12, "weight": 2, "cooldown": 36},
+  {"id": "plague",    "name": "疫",   "min_age": 10, "weight": 1, "cooldown": 120},
+  {"id": "suit",      "name": "讼",   "min_age": 16, "weight": 3, "cooldown": 24},
+  {"id": "wedding",   "name": "婚嫁", "min_age": 10, "weight": 3, "cooldown": 36},
+  {"id": "harvest",   "name": "丰年", "min_age": 16, "cond": "farm",   "weight": 4, "cooldown": 12},
+  {"id": "reward",    "name": "旌表", "min_age": 20, "cond": "famous", "weight": 2, "cooldown": 36},
+  {"id": "school",    "name": "入学", "min_age": 25, "cond": "parent", "weight": 2, "cooldown": 60},
+  {"id": "rash",      "name": "疹",   "min_age": 1,  "max_age": 6, "weight": 2, "cooldown": 12},
+  {"id": "riverfall", "name": "落水", "min_age": 2,  "max_age": 7, "weight": 2, "cooldown": 12},
+  {"id": "find_coin", "name": "拾钱", "min_age": 3,  "max_age": 8, "weight": 2, "cooldown": 12},
+  {"id": "quarrel",   "name": "口角", "min_age": 3,  "max_age": 9, "weight": 2, "cooldown": 12}
+]
