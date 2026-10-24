@@ -777,6 +777,7 @@ func _child_year() -> void:
 
 
 func _apply_child_event(id: String) -> void:
+	_log_fact("child", "parent", {"id": id})
 	var warm := Color(0.30, 0.42, 0.22)
 	var cold := Color(0.62, 0.24, 0.18)
 	match id:
@@ -933,6 +934,14 @@ func _content_issues() -> Array:
 	return issues
 
 
+func _count_facts(kind: String) -> int:
+	var n := 0
+	for f in facts:
+		if str((f as Dictionary).get("kind", "")) == kind:
+			n += 1
+	return n
+
+
 func _run_life_slice(seed_value: int, years: int) -> Dictionary:
 	# M2-05：从出生开始跑一段完整人生，检查每一年的边界与阶段是否都发生
 	ended = false
@@ -945,10 +954,22 @@ func _run_life_slice(seed_value: int, years: int) -> Dictionary:
 	var stages: Array = []
 	var money_ok := true
 	var hp_ok := true
-	for y in range(years):
-		if ended:
-			break
+	var guard := 0
+	# 节令会额外推进时间，所以按年龄而不是按迭代次数收口
+	while age < years and not ended and guard < years * 4:
+		guard += 1
 		_advance_months(12)
+		# 模拟玩家：把到期的节令都过掉，选第一项
+		busy = false
+		for i in range(6):
+			var sc := _due_scene()
+			if sc.is_empty():
+				break
+			var sid := str(sc["id"])
+			var opts: Array = SCENE_OPTS.get(sid, [])
+			if opts.is_empty():
+				break
+			_pick_scene_option(sid, str((opts[0] as Dictionary)["id"]))
 		if boundary_log.has("settle"):
 			settles += 1
 		stages.append(_autonomy_stage())
@@ -956,6 +977,8 @@ func _run_life_slice(seed_value: int, years: int) -> Dictionary:
 			money_ok = false
 		if health < 0.0 or health > 100.0:
 			hp_ok = false
+	# 结算次数以事实为准：一次年关一条 year 事实
+	settles = _count_facts("year")
 	return {
 		"age": age,
 		"ended": ended,
@@ -965,6 +988,8 @@ func _run_life_slice(seed_value: int, years: int) -> Dictionary:
 		"hp_ok": hp_ok,
 		"facts": facts.size(),
 		"dead": (parent_dead as Dictionary).duplicate(true),
+		"scenes": _count_facts("scene"),
+		"child_facts": _count_facts("child"),
 	}
 
 
@@ -1869,7 +1894,8 @@ func _run_verify_smoke() -> void:
 			saw_adult = true
 	var slice_ok: bool = int(slice["age"]) >= 18 and not bool(slice["ended"]) \
 		and int(slice["settles"]) >= 18 and bool(slice["money_ok"]) and bool(slice["hp_ok"]) \
-		and saw_minor and saw_adult and int(slice["facts"]) > 0
+		and saw_minor and saw_adult and int(slice["facts"]) > 0 \
+		and int(slice["scenes"]) >= 50 and int(slice["child_facts"]) >= 3
 	if slice_ok:
 		oks += 1
 		print("[VERIFY] PASS life_slice_0_18 age=", slice["age"], " settles=", slice["settles"], " facts=", slice["facts"])
@@ -2616,6 +2642,7 @@ func _pick_scene_option(sid: String, oid: String) -> void:
 		money -= cost
 		_apply_gain(opt.get("gain", {}))
 		scenes_done["%d_%s" % [year, sid]] = true
+		_log_fact("scene", "festival", {"id": sid, "year": year})
 		var line := str(opt["text"])
 		# 童年 + 家里紧 → 换一句更苦的，并留下墓志印记
 		if age < 12 and money < 250 and opt.has("poor"):
@@ -5011,7 +5038,10 @@ func _on_new_year() -> void:
 			_toast("今年开科，书院可以应解试。", Color(0.48, 0.32, 0.16))
 	boundary_log.append("settle")
 	last_boundary_fid = _log_fact("year", "boundary", {"year": year})
-	_roll_event()
+	if age < 7:
+		_child_year()	# 蒙养之年：不由玩家选，父母带着过
+	else:
+		_roll_event()
 	boundary_log.append("events")
 	# 生子
 	if age == 30 and married and children == 0 and not milestones.has("child1"):

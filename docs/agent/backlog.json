@@ -392,7 +392,8 @@
                       "status":  "in_progress",
                       "owner":  null,
                       "evidence":  [
-                                       "docs/verification/M2-05a.md"
+                                       "docs/verification/M2-05a.md",
+                                       "docs/verification/M2-05b.md"
                                    ],
                       "commit_sha":  null,
                       "remote_sha":  null,

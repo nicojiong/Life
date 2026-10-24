@@ -11,7 +11,7 @@
     "remote_mutations_performed":  true,
     "current_task":  "M2-05",
     "next_task":  "M1-04",
-    "task_status":  "M2-05a-pushed",
+    "task_status":  "M2-05b-pushed",
     "branch":  "16 个 agent/* 堆叠分支（见 docs/DELIVERY_M1.md）",
     "base_sha":  "bf0846f1c20cbcf4dd0cf5f5707b0cf1c88e12cb",
     "commit_sha":  "4466c07634746641983a8522d06997e3b5e61d03",
@@ -24,5 +24,5 @@
                      "docs/BASELINE.md",
                      "docs/tasks/M0-01.md"
                  ],
-    "next_step":  "M3 内容规模化；或补节令/童年事件断言"
+    "next_step":  "M3 内容规模化；或把童年事件内容与父母性情/家境挂钩"
 }
