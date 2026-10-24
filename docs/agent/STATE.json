@@ -9,10 +9,10 @@
     "godot_run":  "import_only",
     "game_code_modified":  false,
     "remote_mutations_performed":  true,
-    "current_task":  "M1-01",
+    "current_task":  "M0-01..M0-04, M1-01a, M1-02a-c, M1-03a-c, M1-04a-d, CI",
     "next_task":  "M1-04",
-    "task_status":  "in_progress",
-    "branch":  "agent/M1-01a-relations",
+    "task_status":  "pushed",
+    "branch":  "16 个 agent/* 堆叠分支（见 docs/DELIVERY_M1.md）",
     "base_sha":  "bf0846f1c20cbcf4dd0cf5f5707b0cf1c88e12cb",
     "commit_sha":  "07fbe20d45fa6d8ce4c9ff0914471a74b2a92401",
     "remote_sha":  "07fbe20d45fa6d8ce4c9ff0914471a74b2a92401",
@@ -24,5 +24,5 @@
                      "docs/BASELINE.md",
                      "docs/tasks/M0-01.md"
                  ],
-    "next_step":  "推送后记录 SHA；最后一轮做整体交付报告"
+    "next_step":  "评审并逐条合并；合并后从 M1-01b（actor 表）继续"
 }
