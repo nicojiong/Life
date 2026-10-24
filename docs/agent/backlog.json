@@ -340,7 +340,8 @@
                       "owner":  null,
                       "evidence":  [
                                        "docs/verification/M2-03a-debt.md",
-                                       "docs/verification/M2-03b-family.md"
+                                       "docs/verification/M2-03b-family.md",
+                                       "docs/verification/M2-03c-master.md"
                                    ],
                       "commit_sha":  null,
                       "remote_sha":  null,

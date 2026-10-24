@@ -106,7 +106,7 @@ var month_frac := 0.0
 
 ## 存档格式版本：字段增删时递增，读档据此做迁移
 const ContentSchema := preload("res://scripts/core/content_schema.gd")
-const SAVE_SCHEMA_VERSION := 16
+const SAVE_SCHEMA_VERSION := 17
 var save_schema_seen := 0
 ## 读到更高版本的存档后置位：拒绝加载、拒绝覆盖
 var save_future := false
@@ -282,6 +282,7 @@ const YEAR_SCENES := [
 	{"m": 6, "id": "jiemi", "name": "青黄不接", "cond": "poor"},
 {"m": 9, "id": "debt_month", "name": "还米", "cond": "debt"},
 	{"m": 2, "id": "bing", "name": "卧病", "cond": "ill"},
+	{"m": 4, "id": "bai_shi", "name": "拜师", "cond": "apprentice"},
 ]
 var scenes_done := {}
 
@@ -294,6 +295,14 @@ const SCENE_OPTS := {
 		 "text": "你只肯借一斗。孙四笑了笑，说少借点也好。"},
 		{"id": "refuse", "label": "咬牙不借", "gain": {"fame": 1},
 		 "text": "你把裤腰带又紧了一扣，没去敲孙四的门。"},
+	],
+	"bai_shi": [
+		{"id": "pay", "label": "备二百钱上门", "gain": {},
+		 "text": "你拎着两包点心站在作坊门口，手心全是汗。"},
+		{"id": "introduce", "label": "托人介绍", "gain": {},
+		 "text": "你找了个能说上话的人，替你在陈师傅面前提了一句。"},
+		{"id": "decline", "label": "算了，不去", "gain": {},
+		 "text": "你从作坊门口走开，木头香还在鼻子里。"},
 	],
 	"bing": [
 		{"id": "sell", "label": "把母亲的银簪当了", "gain": {},
@@ -451,6 +460,7 @@ func _state_dict() -> Dictionary:
 		"women_rank": women_rank, "scenes_done": scenes_done, "child_last": child_last,
 		"time_scale": time_scale, "slot": slot, "month_frac": month_frac,
 	"boundary_log": boundary_log.duplicate(true), "player_build": (player_build as Dictionary).duplicate(true),
+	"apprentice_state": apprentice_state, "master_available": master_available,
 	"heirlooms": (heirlooms as Dictionary).duplicate(true),
 	"family_ill_pending": family_ill_pending, "ill_who": ill_who,
 	"debt_units": debt_units, "debt_due": debt_due, "debt_state": debt_state,
@@ -619,6 +629,8 @@ func _load_game() -> bool:
 	month_frac = float(d.get("month_frac", month_frac))
 	if d.get("boundary_log") is Array:
 		boundary_log = d["boundary_log"]
+	apprentice_state = str(d.get("apprentice_state", apprentice_state))
+	master_available = bool(d.get("master_available", master_available))
 	if d.get("heirlooms") is Dictionary:
 		heirlooms = d["heirlooms"]
 	family_ill_pending = bool(d.get("family_ill_pending", family_ill_pending))
@@ -1338,7 +1350,8 @@ func _continuity_snapshot() -> Dictionary:
 			"father": father_name, "mother": mother_name},
 		"frac_probe": int(month_frac + 0.58),
 		"debt": {"units": debt_units, "due": debt_due, "state": debt_state, "deferrals": debt_deferrals, "sid": debt_due_sid},
-		"heirlooms": (heirlooms as Dictionary).duplicate(true),
+		"apprentice_state": apprentice_state, "master_available": master_available,
+	"heirlooms": (heirlooms as Dictionary).duplicate(true),
 		"family": {"ill_pending": family_ill_pending, "ill_who": ill_who},
 	}
 
@@ -3017,6 +3030,83 @@ func _run_verify_smoke() -> void:
 		print("[VERIFY] FAIL family_sacrifice started=", started, " treat_fail=", treat_fail, " treat=", treat_ok, " heirloom=", heirloom_ok, " endure=", endure_ok, " reload=", reload_fam_ok)
 
 
+	# M2-03c：拜师链——送钱不够、关系不足被拒、保人介绍成功、拒绝、重载保持
+	var keep_m_pov := pov
+	var keep_m_money := money
+	var keep_m_state := apprentice_state
+	var keep_m_avail := master_available
+	var keep_m_craft := craft
+	var keep_m_rank := craft_rank
+	var keep_m_rel := int(relations.get(MASTER_ID, 0))
+	var keep_m_story: Dictionary = (story as Dictionary).duplicate(true)
+	var keep_m_facts: Array = (facts as Array).duplicate(true)
+	if pov != "child":
+		_switch_pov("child")
+	# 干净起点：12 岁、无师、无保人、手艺人关系为 0
+	ended = false
+	age = 12
+	money = 100
+	craft = 0.0
+	craft_rank = 0
+	apprentice_state = "none"
+	master_available = true
+	relations[MASTER_ID] = 0
+	story.erase("有人作保")
+	story.erase("借米还清")
+	story.erase("拜师")
+	facts = []
+	fact_seq = 0
+	var can_ask: bool = _can_ask_apprentice()
+	# 1) 钱不够：失败，状态不变
+	var r_short := _ask_apprentice(true)
+	var short_ok: bool = r_short == "insufficient" and apprentice_state == "none" and money == 100
+	# 2) 关系不足且无保人：被拒，state = refused
+	var r_refused := _ask_apprentice(false)
+	var refused_ok: bool = r_refused == "refused" and apprentice_state == "refused"
+	# 3) 有人作保：不用钱也能成
+	apprentice_state = "none"
+	story["有人作保"] = true
+	var r_guar := _ask_apprentice(false)
+	var guar_ok: bool = r_guar == "ok" and apprentice_state == "apprentice" and int(relations[MASTER_ID]) >= 2 and craft > 0.0
+	# 4) 师傅不在：返回 unavailable
+	apprentice_state = "none"
+	master_available = false
+	var r_gone := _ask_apprentice(false)
+	var gone_ok: bool = r_gone == "unavailable" and apprentice_state == "none"
+	master_available = true
+	# 5) 主动拒绝：进 refused 且留痕
+	apprentice_state = "none"
+	story.erase("没拜成师")
+	_decline_apprentice()
+	var decline_ok: bool = apprentice_state == "refused" and bool(story.get("没拜成师", false))
+	# 6) 存读档保持
+	apprentice_state = "apprentice"
+	master_available = true
+	_save_game()
+	apprentice_state = "none"
+	master_available = false
+	_load_game()
+	var reload_m_ok: bool = apprentice_state == "apprentice" and master_available
+	var master_ok: bool = can_ask and short_ok and refused_ok and guar_ok and gone_ok and decline_ok and reload_m_ok
+	money = keep_m_money
+	apprentice_state = keep_m_state
+	master_available = keep_m_avail
+	craft = keep_m_craft
+	craft_rank = keep_m_rank
+	relations[MASTER_ID] = keep_m_rel
+	story = keep_m_story
+	facts = keep_m_facts
+	fact_seq = keep_m_facts.size()
+	if pov != keep_m_pov:
+		_switch_pov(keep_m_pov)
+	if master_ok:
+		oks += 1
+		print("[VERIFY] PASS master_chain short=", short_ok, " refused=", refused_ok, " guarantee=", guar_ok, " gone=", gone_ok, " reload=", reload_m_ok)
+	else:
+		fails.append("master_chain")
+		print("[VERIFY] FAIL master_chain can=", can_ask, " short=", short_ok, " refused=", refused_ok, " guarantee=", guar_ok, " gone=", gone_ok, " decline=", decline_ok, " reload=", reload_m_ok)
+
+
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
 	var keep_age := age
@@ -3758,6 +3848,22 @@ func _pick_scene_option(sid: String, oid: String) -> void:
 		var jump0 := _scene_months_to_next()
 		if jump0 > 0:
 			_advance_months(jump0)
+		Sfx.play("ok")
+		_save_game()
+		return
+	if sid == "bai_shi":
+		match oid:
+			"pay":
+				var r1 := _ask_apprentice(true)
+				if r1 == "insufficient":
+					_toast("二百钱还没凑齐，你在门口站了站就回来了。", Color(0.62, 0.24, 0.18))
+			"introduce":
+				var r2 := _ask_apprentice(false)
+				if r2 == "refused":
+					_log_fact("craft", "introduce_refused", {})
+			"decline":
+				_decline_apprentice()
+		scenes_done["%d_%s" % [year, sid]] = true
 		Sfx.play("ok")
 		_save_game()
 		return
@@ -6580,6 +6686,70 @@ func _maybe_start_family_illness() -> void:
 	_log_fact("family", "illness_started", {"who": who, "health": _vitals_of(who)["health"]})
 
 
+## ------------------------------------------------------------------
+## M2-03c 拜师 / 介绍 / 拒绝链
+## 木匠陈师傅：可以送礼拜师、可以托保人介绍、也可以不去。
+## ------------------------------------------------------------------
+
+const MASTER_ID := "chen"
+const MASTER_NAME := "陈师傅"
+const APPRENTICE_FEE := 200
+
+var apprentice_state := "none"   # none / apprentice / refused
+var master_available := true
+
+
+func _can_ask_apprentice() -> bool:
+	if age < 12 or age > 20:
+		return false
+	if apprentice_state != "none":
+		return false
+	if not master_available:
+		return false
+	if bool(story.get("士人", false)):
+		return false
+	return true
+
+
+func _ask_apprentice(paid: bool) -> String:
+	# 返回 ok / insufficient / refused / unavailable / already
+	if not master_available:
+		return "unavailable"
+	if apprentice_state != "none":
+		return "already"
+	if paid and money < APPRENTICE_FEE:
+		_log_fact("craft", "apprentice_fee_short", {"fee": APPRENTICE_FEE})
+		return "insufficient"
+	var rel := int(relations.get(MASTER_ID, 0))
+	var guaranteed := bool(story.get("有人作保", false)) or bool(story.get("借米还清", false))
+	if paid:
+		money -= APPRENTICE_FEE
+		rel += 2
+	var ok := rel >= 3 or guaranteed
+	if not ok:
+		apprentice_state = "refused"
+		relations[MASTER_ID] = rel - 1
+		_log_fact("craft", "apprentice_refused", {"relation": rel})
+		_toast("陈师傅上下看了你一眼，说手上活儿还没到时候。", Color(0.62, 0.24, 0.18))
+		return "refused"
+	apprentice_state = "apprentice"
+	relations[MASTER_ID] = rel + 3
+	craft += 6.0
+	craft_rank = maxi(craft_rank, 1)
+	story["拜师"] = true
+	_log_fact("craft", "apprentice_started", {"paid": paid, "relation": rel})
+	_toast("陈师傅把刨子递给你：先学推，推平了再说别的。", Color(0.30, 0.42, 0.22))
+	return "ok"
+
+
+func _decline_apprentice() -> void:
+	apprentice_state = "refused"
+	story["没拜成师"] = true
+	relations[MASTER_ID] = int(relations.get(MASTER_ID, 0)) - 1
+	_log_fact("craft", "apprentice_declined", {})
+	_toast("你在门口站了一会儿，到底没进去。", Color(0.30, 0.26, 0.21))
+
+
 func _scene_ok(s: Dictionary) -> bool:
 	var cond := str(s.get("cond", ""))
 	match cond:
@@ -6589,6 +6759,8 @@ func _scene_ok(s: Dictionary) -> bool:
 			return _has_active_debt()
 		"ill":
 			return family_ill_pending and ill_who != "" and not _actor_is_dead(ill_who)
+		"apprentice":
+			return _can_ask_apprentice()
 	return true
 
 
