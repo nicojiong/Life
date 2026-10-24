@@ -14,8 +14,8 @@
     "task_status":  "paused_for_playtest",
     "branch":  "agent/M1-ci-workflow",
     "base_sha":  "bf0846f1c20cbcf4dd0cf5f5707b0cf1c88e12cb",
-    "commit_sha":  "9c86ac7a1c4b024279af05e1792a721a9713082c",
-    "remote_sha":  "9c86ac7a1c4b024279af05e1792a721a9713082c",
+    "commit_sha":  "07462f38d7b6b852c9bf6bf13cfc28ed232d1d73",
+    "remote_sha":  "07462f38d7b6b852c9bf6bf13cfc28ed232d1d73",
     "pr_url":  "https://github.com/nicojiong/Life/pull/1",
     "ci_status":  "green: isolated-smoke + continuity 均 success (9c86ac7)",
     "integrated_sha":  null,
@@ -24,5 +24,11 @@
                      "docs/verification/M1-05d.md",
                      "docs/REVIEW_M1.md"
                  ],
-    "next_step":  "按反馈修问题；恢复后先做借米因果链"
+    "next_step":  "按反馈修问题；恢复后先做借米因果链",
+    "playtest":  {
+                     "baseline_sha":  "b50abd09f01a5664822f91d8101126ef4d09e89f",
+                     "entry":  "playtest.bat（独立存档 浮生试玩） / play.bat（原存档 浮生）",
+                     "save_dir":  "%APPDATA%\\Godot\\app_userdata\\浮生试玩",
+                     "docs":  "docs/PLAYTEST.md"
+                 }
 }
