@@ -1,0 +1,819 @@
+﻿{
+    "planning_version":  "1.0",
+    "created_at":  "2026-10-24",
+    "timezone":  "Asia/Shanghai",
+    "repository":  "https://github.com/nicojiong/Life",
+    "baseline_commit":  "2d035379f21abbc8d1d6f06d0328eb756751b993",
+    "description":  "拟实施任务，全部尚未执行；每个任务按依赖验收后提交并push任务分支。",
+    "tasks":  [
+                  {
+                      "id":  "M0-01",
+                      "title":  "冻结现状与修正文档",
+                      "depends_on":  [
+
+                                     ],
+                      "priority":  "P0",
+                      "outputs":  [
+                                      "docs/BASELINE.md",
+                                      "docs/GDD.md 的有效规则索引"
+                                  ],
+                      "acceptance":  [
+                                         "记录真实仓库HEAD、Godot --version、环境和源码/编辑器导入检查；实际游戏运行须在已证实隔离后进行，否则明确留到M0-02补测",
+                                         "把已实现科举等过时缺口改正；新旧设计不再同时生效",
+                                         "列出不可执行的检查及原因，不冒充通过"
+                                     ],
+                      "status":  "implemented",
+                      "owner":  null,
+                      "evidence":  [
+                                       "docs/BASELINE.md",
+                                       "docs/tasks/M0-01.md",
+                                       "README.md §已知缺口",
+                                       "docs/GDD.md §有效规则索引"
+                                   ],
+                      "commit_sha":  null,
+                      "remote_sha":  null,
+                      "pr_url":  null
+                  },
+                  {
+                      "id":  "M0-02",
+                      "title":  "建立隔离的验证入口",
+                      "depends_on":  [
+                                         "M0-01"
+                                     ],
+                      "priority":  "P0",
+                      "outputs":  [
+                                      "测试专用用户目录配置",
+                                      "tools/verify.ps1（拟新建）",
+                                      "tests/ 的最小断言入口（拟新建）",
+                                      ".github/workflows/verify.yml（拟新建，按真实运行环境接通）"
+                                  ],
+                      "acceptance":  [
+                                         "所有游戏启动和stage都使用已证实的独立数据目录；记录真实启动结果且不读取/写入玩家存档",
+                                         "导入和启动失败返回非零退出码，关键错误不被日志吞掉",
+                                         "现有stage明确区分演示、截图与行为断言；--fresh不接触玩家存档",
+                                         "在可用的CI环境接通同一最小验证入口；权限或运行器不可用时如实标blocked，不宣称CI完成"
+                                     ],
+                      "status":  "todo",
+                      "owner":  null,
+                      "evidence":  [
+
+                                   ],
+                      "commit_sha":  null,
+                      "remote_sha":  null,
+                      "pr_url":  null
+                  },
+                  {
+                      "id":  "M0-03",
+                      "title":  "统一内容ID并修复已确认接线错误",
+                      "depends_on":  [
+                                         "M0-02"
+                                     ],
+                      "priority":  "P0",
+                      "outputs":  [
+                                      "内容唯一ID/引用校验",
+                                      "商贾出身映射修复",
+                                      "重复NPC ID修复"
+                                  ],
+                      "acceptance":  [
+                                         "商贾出生得到对应父亲行当",
+                                         "重复lao_seng与不存在引用会被校验拒绝",
+                                         "只改必要映射，保留合法出身分布"
+                                     ],
+                      "status":  "todo",
+                      "owner":  null,
+                      "evidence":  [
+
+                                   ],
+                      "commit_sha":  null,
+                      "remote_sha":  null,
+                      "pr_url":  null
+                  },
+                  {
+                      "id":  "M0-04",
+                      "title":  "阻断死亡后的行动收益与普通存档",
+                      "depends_on":  [
+                                         "M0-02"
+                                     ],
+                      "priority":  "P0",
+                      "outputs":  [
+                                      "当前调用链的终止保护",
+                                      "死亡中断回归场景"
+                                  ],
+                      "acceptance":  [
+                                         "跨寿终长行动与战死特殊行动均不继续发奖",
+                                         "死亡只触发一次，结束后的命令被拒绝",
+                                         "如暂未建人生档案，先留可靠迁移检查点，不再静默清档又重写",
+                                         "行动完成与死亡同tick时，主体死亡判定先于完成收益；先前已结算部分保留"
+                                     ],
+                      "status":  "todo",
+                      "owner":  null,
+                      "evidence":  [
+
+                                   ],
+                      "commit_sha":  null,
+                      "remote_sha":  null,
+                      "pr_url":  null
+                  },
+                  {
+                      "id":  "M1-01",
+                      "title":  "抽出人物、家庭和世界状态",
+                      "depends_on":  [
+                                         "M0-03",
+                                         "M0-04"
+                                     ],
+                      "priority":  "P0",
+                      "outputs":  [
+                                      "WorldState/PersonState/HouseholdState/RelationshipState",
+                                      "现有街景适配器"
+                                  ],
+                      "acceptance":  [
+                                         "主角父母统一person_id且死亡保留记录",
+                                         "家庭财产与个人字段各有唯一所有者",
+                                         "重建场景与换视角不改变关系、职业或身份"
+                                     ],
+                      "status":  "todo",
+                      "owner":  null,
+                      "evidence":  [
+
+                                   ],
+                      "commit_sha":  null,
+                      "remote_sha":  null,
+                      "pr_url":  null
+                  },
+                  {
+                      "id":  "M1-02",
+                      "title":  "统一时钟和行动事务",
+                      "depends_on":  [
+                                         "M1-01"
+                                     ],
+                      "priority":  "P0",
+                      "outputs":  [
+                                      "SimulationClock",
+                                      "ActionCommand/ActionResult",
+                                      "所有收益入口的统一结算适配"
+                                  ],
+                      "acceptance":  [
+                                         "有收益的行动消耗声明时间或有限资源",
+                                         "建立行动完成/生日/年关/死亡的最小时间边界队列；长行动分段可中断且无重复收益，M2复用该队列扩展叙事",
+                                         "年度结算与老化不因当前POV改变；阶段边界只触发一次"
+                                     ],
+                      "status":  "todo",
+                      "owner":  null,
+                      "evidence":  [
+
+                                   ],
+                      "commit_sha":  null,
+                      "remote_sha":  null,
+                      "pr_url":  null
+                  },
+                  {
+                      "id":  "M1-03",
+                      "title":  "可复现随机流与因果日志",
+                      "depends_on":  [
+                                         "M1-02"
+                                     ],
+                      "priority":  "P0",
+                      "outputs":  [
+                                      "RngService五类流",
+                                      "Fact/EventLog",
+                                      "重放命令记录"
+                                  ],
+                      "acceptance":  [
+                                         "同版本同seed同命令得到同一状态摘要",
+                                         "调整相机/视觉随机不改变模拟结果",
+                                         "事件有cause_ids，ID与排序规则稳定，未知因果显式标注"
+                                     ],
+                      "status":  "todo",
+                      "owner":  null,
+                      "evidence":  [
+
+                                   ],
+                      "commit_sha":  null,
+                      "remote_sha":  null,
+                      "pr_url":  null
+                  },
+                  {
+                      "id":  "M1-04",
+                      "title":  "版本化存档、恢复和迁移",
+                      "depends_on":  [
+                                         "M1-03"
+                                     ],
+                      "priority":  "P0",
+                      "outputs":  [
+                                      "SaveEnvelope",
+                                      "原子保存/备份",
+                                      "旧版迁移fixtures"
+                                  ],
+                      "acceptance":  [
+                                         "家庭、关系、事件、节令、队列、时间、RNG往返一致",
+                                         "死亡父母不补生；旧档缺失信息按迁移策略标记而不假装恢复",
+                                         "写入中断或损坏可回退备份；RNG的64位seed/state用十进制字符串"
+                                     ],
+                      "status":  "todo",
+                      "owner":  null,
+                      "evidence":  [
+
+                                   ],
+                      "commit_sha":  null,
+                      "remote_sha":  null,
+                      "pr_url":  null
+                  },
+                  {
+                      "id":  "M1-05",
+                      "title":  "收敛可靠模拟底座",
+                      "depends_on":  [
+                                         "M1-04"
+                                     ],
+                      "priority":  "P0",
+                      "outputs":  [
+                                      "黄金重放fixture",
+                                      "生命周期边界验证报告"
+                                  ],
+                      "acceptance":  [
+                                         "时间/收益/死亡/读档的首批回归场景全通过",
+                                         "关键状态仅由模拟层修改，UI无直接写核心字段通道",
+                                         "保存中断长行动后恢复不会重复扣费或发奖"
+                                     ],
+                      "status":  "todo",
+                      "owner":  null,
+                      "evidence":  [
+
+                                   ],
+                      "commit_sha":  null,
+                      "remote_sha":  null,
+                      "pr_url":  null
+                  },
+                  {
+                      "id":  "M2-01",
+                      "title":  "建立事件定义与实例协议",
+                      "depends_on":  [
+                                         "M1-05"
+                                     ],
+                      "priority":  "P1",
+                      "outputs":  [
+                                      "版本化Storylet schema",
+                                      "条件/效果允许清单",
+                                      "EventInstance与role_bindings"
+                                  ],
+                      "acceptance":  [
+                                         "缺字段、非法效果、跨时代引用和演员冲突在入库时失败",
+                                         "同一事件定义可以绑定不同合法人物",
+                                         "定义与运行中的事件状态分离，无任意eval"
+                                     ],
+                      "status":  "todo",
+                      "owner":  null,
+                      "evidence":  [
+
+                                   ],
+                      "commit_sha":  null,
+                      "remote_sha":  null,
+                      "pr_url":  null
+                  },
+                  {
+                      "id":  "M2-02",
+                      "title":  "建立到期队列与机会调度",
+                      "depends_on":  [
+                                         "M2-01"
+                                     ],
+                      "priority":  "P1",
+                      "outputs":  [
+                                      "Scheduler",
+                                      "候选筛选与加权选择",
+                                      "过期/取消/互斥策略"
+                                  ],
+                      "acceptance":  [
+                                         "到期债务不能因随机抽选而漏处理",
+                                         "同tick按优先级和稳定ID排序，级联事件有上限与后续处理策略",
+                                         "演员死亡/迁移和无候选有可解释结果，不无限循环"
+                                     ],
+                      "status":  "todo",
+                      "owner":  null,
+                      "evidence":  [
+
+                                   ],
+                      "commit_sha":  null,
+                      "remote_sha":  null,
+                      "pr_url":  null
+                  },
+                  {
+                      "id":  "M2-03",
+                      "title":  "迁移三条因果样例",
+                      "depends_on":  [
+                                         "M2-02"
+                                     ],
+                      "priority":  "P1",
+                      "outputs":  [
+                                      "借米/偿还或延期链",
+                                      "家庭牺牲/珍贵物品链",
+                                      "拜师/介绍/拒绝链"
+                                  ],
+                      "acceptance":  [
+                                         "22岁以后新借款仍按实际日期到期",
+                                         "每链有接受、拒绝、缺资源和演员失效路径",
+                                         "所有长期后果跨存档与年份保持正确"
+                                     ],
+                      "status":  "todo",
+                      "owner":  null,
+                      "evidence":  [
+
+                                   ],
+                      "commit_sha":  null,
+                      "remote_sha":  null,
+                      "pr_url":  null
+                  },
+                  {
+                      "id":  "M2-04",
+                      "title":  "实现分阶段自主权",
+                      "depends_on":  [
+                                         "M2-03"
+                                     ],
+                      "priority":  "P1",
+                      "outputs":  [
+                                      "AgePolicy/GuardianPolicy",
+                                      "0–6、6–12、12+对应行动集",
+                                      "个人与家庭导演模式边界"
+                                  ],
+                      "acceptance":  [
+                                         "0–6的家庭决定取决于家境与监护人目标",
+                                         "6–12可以争取和拒绝部分安排；12+扩大行动空间",
+                                         "不可行动说明理由和替代方案；无出生终身职业锁定"
+                                     ],
+                      "status":  "todo",
+                      "owner":  null,
+                      "evidence":  [
+
+                                   ],
+                      "commit_sha":  null,
+                      "remote_sha":  null,
+                      "pr_url":  null
+                  },
+                  {
+                      "id":  "M2-05",
+                      "title":  "交付0–18岁可玩因果切片",
+                      "depends_on":  [
+                                         "M2-04"
+                                     ],
+                      "priority":  "P1",
+                      "outputs":  [
+                                      "纪事/承诺/因果反馈UI",
+                                      "同种子不同选择演示记录"
+                                  ],
+                      "acceptance":  [
+                                         "至少两个选择产生可见跨年回响",
+                                         "玩家能看见成本、承诺和已知信息；未知事实不提前泄漏",
+                                         "真实试玩能解释前因后果；记录尚未解决的体验问题"
+                                     ],
+                      "status":  "todo",
+                      "owner":  null,
+                      "evidence":  [
+
+                                   ],
+                      "commit_sha":  null,
+                      "remote_sha":  null,
+                      "pr_url":  null
+                  },
+                  {
+                      "id":  "M3-01",
+                      "title":  "让12名核心人物拥有独立生活",
+                      "depends_on":  [
+                                         "M2-05"
+                                     ],
+                      "priority":  "P1",
+                      "outputs":  [
+                                      "NPC基础目标/需要/效用选择",
+                                      "稳定人物关系与记忆",
+                                      "原创角色模板"
+                                  ],
+                      "acceptance":  [
+                                         "玩家不干预时NPC会做合法行动",
+                                         "NPC会拒绝且行为可解释；同名不同ID不混淆",
+                                         "人物死亡/迁移影响相关事件，回忆引用真实事实"
+                                     ],
+                      "status":  "todo",
+                      "owner":  null,
+                      "evidence":  [
+
+                                   ],
+                      "commit_sha":  null,
+                      "remote_sha":  null,
+                      "pr_url":  null
+                  },
+                  {
+                      "id":  "M3-02",
+                      "title":  "打通三条可交叉的生活路线",
+                      "depends_on":  [
+                                         "M3-01"
+                                     ],
+                      "priority":  "P1",
+                      "outputs":  [
+                                      "求学路线",
+                                      "手艺/营生路线",
+                                      "留乡/照护路线"
+                                  ],
+                      "acceptance":  [
+                                         "三路线均能从出生玩到结局",
+                                         "不读书、改行、晚年补学具有可达路径",
+                                         "不同路线至少改变关系网络、机会或生活结构，不只是数值名称"
+                                     ],
+                      "status":  "todo",
+                      "owner":  null,
+                      "evidence":  [
+
+                                   ],
+                      "commit_sha":  null,
+                      "remote_sha":  null,
+                      "pr_url":  null
+                  },
+                  {
+                      "id":  "M3-03",
+                      "title":  "替换固定婚育和家庭年龄节点",
+                      "depends_on":  [
+                                         "M3-02"
+                                     ],
+                      "priority":  "P1",
+                      "outputs":  [
+                                      "关系发展与双方意愿",
+                                      "家庭生命周期",
+                                      "父母/子女独立状态"
+                                  ],
+                      "acceptance":  [
+                                         "不在固定年龄强制婚育/丧亲/抱孙",
+                                         "拒绝关系或无子女人生可继续",
+                                         "家庭变化依据person状态与时代规则，文案演员正确"
+                                     ],
+                      "status":  "todo",
+                      "owner":  null,
+                      "evidence":  [
+
+                                   ],
+                      "commit_sha":  null,
+                      "remote_sha":  null,
+                      "pr_url":  null
+                  },
+                  {
+                      "id":  "M3-04",
+                      "title":  "完成死亡与人生档案",
+                      "depends_on":  [
+                                         "M3-03"
+                                     ],
+                      "priority":  "P1",
+                      "outputs":  [
+                                      "只读人生档案",
+                                      "基于事实的多维传记/墓志",
+                                      "重新开始与继续世界的明确规则"
+                                  ],
+                      "acceptance":  [
+                                         "每个结局关键句能追溯到事实或注明叙述者评价",
+                                         "普通生活有具体回望，不以未考进士判定无意义",
+                                         "死后不接受活人命令；新局world_id不复用旧局状态"
+                                     ],
+                      "status":  "todo",
+                      "owner":  null,
+                      "evidence":  [
+
+                                   ],
+                      "commit_sha":  null,
+                      "remote_sha":  null,
+                      "pr_url":  null
+                  },
+                  {
+                      "id":  "M3-05",
+                      "title":  "完成首个完整人生版本",
+                      "depends_on":  [
+                                         "M3-04"
+                                     ],
+                      "priority":  "P1",
+                      "outputs":  [
+                                      "约40条已验证storylets",
+                                      "3条长期回响链",
+                                      "实际试玩与批量模拟报告"
+                                  ],
+                      "acceptance":  [
+                                         "覆盖各年龄和路线，重要事件均有可达fixture",
+                                         "固定种子集合批跑无状态不变量错误，记录样本范围而非声称零bug",
+                                         "玩家能辨识人物愿望与自己的两次长期影响"
+                                     ],
+                      "status":  "todo",
+                      "owner":  null,
+                      "evidence":  [
+
+                                   ],
+                      "commit_sha":  null,
+                      "remote_sha":  null,
+                      "pr_url":  null
+                  },
+                  {
+                      "id":  "M4-01",
+                      "title":  "让经济成为生活选择的约束",
+                      "depends_on":  [
+                                         "M3-05"
+                                     ],
+                      "priority":  "P2",
+                      "outputs":  [
+                                      "家庭/个人/经营账本",
+                                      "契约与物品归属",
+                                      "可解释的收入和费用"
+                                  ],
+                      "acceptance":  [
+                                         "转账不复制资产，抽象收入/回收有来源类型",
+                                         "照护、教育、迁移、工具与经营有用途和机会成本",
+                                         "缺钱时有合理行动空间，避免某出身必然早死的失衡"
+                                     ],
+                      "status":  "todo",
+                      "owner":  null,
+                      "evidence":  [
+
+                                   ],
+                      "commit_sha":  null,
+                      "remote_sha":  null,
+                      "pr_url":  null
+                  },
+                  {
+                      "id":  "M4-02",
+                      "title":  "加入县城旅行与远方联系",
+                      "depends_on":  [
+                                         "M4-01"
+                                     ],
+                      "priority":  "P2",
+                      "outputs":  [
+                                      "地点图与旅行任务",
+                                      "远方信息/通信",
+                                      "NPC分层模拟"
+                                  ],
+                      "acceptance":  [
+                                         "旅行实际消耗统一时间并处理中途事件",
+                                         "人物离开可视场景不丢ID、债务和关系",
+                                         "返回时世界已合理变化，重要因果仍可追溯"
+                                     ],
+                      "status":  "todo",
+                      "owner":  null,
+                      "evidence":  [
+
+                                   ],
+                      "commit_sha":  null,
+                      "remote_sha":  null,
+                      "pr_url":  null
+                  },
+                  {
+                      "id":  "M4-03",
+                      "title":  "扩展职业组织与NPC冲突",
+                      "depends_on":  [
+                                         "M4-02"
+                                     ],
+                      "priority":  "P2",
+                      "outputs":  [
+                                      "更多可组合身份",
+                                      "组织与共同目标",
+                                      "社会系统回归"
+                                  ],
+                      "acceptance":  [
+                                         "改行依据技能/契约/资源，不统一惩罚所有旧职业",
+                                         "至少一个不由玩家触发的NPC冲突影响机会",
+                                         "扩展后已有三路线与旧档保持兼容"
+                                     ],
+                      "status":  "todo",
+                      "owner":  null,
+                      "evidence":  [
+
+                                   ],
+                      "commit_sha":  null,
+                      "remote_sha":  null,
+                      "pr_url":  null
+                  },
+                  {
+                      "id":  "M5-01",
+                      "title":  "建立Agent内容生产流水线",
+                      "depends_on":  [
+                                         "M3-05"
+                                     ],
+                      "priority":  "P2",
+                      "outputs":  [
+                                      "内容brief与生成模板",
+                                      "草稿隔离区",
+                                      "schema/语义/模拟/审阅入口"
+                                  ],
+                      "acceptance":  [
+                                         "每批先10条小规模候选验证",
+                                         "失败内容不进入正式包，保留错误与修订记录",
+                                         "年龄、演员、物品、时代、成本与后果检查可复现"
+                                     ],
+                      "status":  "todo",
+                      "owner":  null,
+                      "evidence":  [
+
+                                   ],
+                      "commit_sha":  null,
+                      "remote_sha":  null,
+                      "pr_url":  null
+                  },
+                  {
+                      "id":  "M5-02",
+                      "title":  "建立质量反馈与受控扩量",
+                      "depends_on":  [
+                                         "M5-01"
+                                     ],
+                      "priority":  "P2",
+                      "outputs":  [
+                                      "内容覆盖/重复/不可达报告",
+                                      "来源和内容版本记录",
+                                      "审阅任务生成规则"
+                                  ],
+                      "acceptance":  [
+                                         "每条正式内容至少有可触发fixture和拒绝/失效覆盖",
+                                         "生成模型换版不静默改变已存档世界",
+                                         "离线无模型依然可完整游玩；运行时AI只列为独立可选实验"
+                                     ],
+                      "status":  "todo",
+                      "owner":  null,
+                      "evidence":  [
+
+                                   ],
+                      "commit_sha":  null,
+                      "remote_sha":  null,
+                      "pr_url":  null
+                  },
+                  {
+                      "id":  "M6-01",
+                      "title":  "把北宋迁移为完整EraPack",
+                      "depends_on":  [
+                                         "M4-03",
+                                         "M5-02"
+                                     ],
+                      "priority":  "P2",
+                      "outputs":  [
+                                      "EraManifest和兼容协议",
+                                      "北宋制度/日历/角色/内容映射",
+                                      "时代数据隔离"
+                                  ],
+                      "acceptance":  [
+                                         "加载入口不固定song.json",
+                                         "内核不硬编码宋代称谓、货币或出生年",
+                                         "包声明覆盖整个允许人生的年份与超界策略"
+                                     ],
+                      "status":  "todo",
+                      "owner":  null,
+                      "evidence":  [
+
+                                   ],
+                      "commit_sha":  null,
+                      "remote_sha":  null,
+                      "pr_url":  null
+                  },
+                  {
+                      "id":  "M6-02",
+                      "title":  "接通时代变迁与出生选择",
+                      "depends_on":  [
+                                         "M6-01"
+                                     ],
+                      "priority":  "P2",
+                      "outputs":  [
+                                      "时代选择与出生流程",
+                                      "世界历史节点队列",
+                                      "历史背景/架空模式记录"
+                                  ],
+                      "acceptance":  [
+                                         "timeline事件实际影响地方状态与机会",
+                                         "相同大历史下不同家庭/行动仍有不同人生",
+                                         "历史资料与玩法虚构标注清楚，年龄与历法一致"
+                                     ],
+                      "status":  "todo",
+                      "owner":  null,
+                      "evidence":  [
+
+                                   ],
+                      "commit_sha":  null,
+                      "remote_sha":  null,
+                      "pr_url":  null
+                  },
+                  {
+                      "id":  "M6-03",
+                      "title":  "第二时代短切片验证架构",
+                      "depends_on":  [
+                                         "M6-02"
+                                     ],
+                      "priority":  "P2",
+                      "outputs":  [
+                                      "制度差异明显的第二时代试验包",
+                                      "跨时代同一套契约测试"
+                                  ],
+                      "acceptance":  [
+                                         "短切片包含出生、成长、营生和关系",
+                                         "第二时代不出现宋代科举、货币和称谓泄漏",
+                                         "正常增加第二时代主要修改内容与明确制度模块，不复制整个游戏"
+                                     ],
+                      "status":  "todo",
+                      "owner":  null,
+                      "evidence":  [
+
+                                   ],
+                      "commit_sha":  null,
+                      "remote_sha":  null,
+                      "pr_url":  null
+                  },
+                  {
+                      "id":  "M6-04",
+                      "title":  "让第二时代具备完整人生",
+                      "depends_on":  [
+                                         "M6-03"
+                                     ],
+                      "priority":  "P2",
+                      "outputs":  [
+                                      "第二时代完整年龄覆盖",
+                                      "时代选择可玩标记",
+                                      "分别隔离的存档与内容版本"
+                                  ],
+                      "acceptance":  [
+                                         "第二时代至少三条生活方向可走完一生",
+                                         "切换时代只发生于开局或明确的新世界操作",
+                                         "未完成时代仍标为试验，不以短演示冒充完成"
+                                     ],
+                      "status":  "todo",
+                      "owner":  null,
+                      "evidence":  [
+
+                                   ],
+                      "commit_sha":  null,
+                      "remote_sha":  null,
+                      "pr_url":  null
+                  },
+                  {
+                      "id":  "M7-01",
+                      "title":  "完善画面、可读性与性能",
+                      "depends_on":  [
+                                         "M3-05"
+                                     ],
+                      "priority":  "P2",
+                      "outputs":  [
+                                      "年龄/身份外观差异",
+                                      "文本/输入/暂停设置",
+                                      "性能基线和热点修复"
+                                  ],
+                      "acceptance":  [
+                                         "指定硬件/分辨率/种子下测量帧时间与模拟步耗时",
+                                         "重要文本与反馈可读，快捷键/鼠标操作一致",
+                                         "性能优化不改变固定seed的模拟事实"
+                                     ],
+                      "status":  "todo",
+                      "owner":  null,
+                      "evidence":  [
+
+                                   ],
+                      "commit_sha":  null,
+                      "remote_sha":  null,
+                      "pr_url":  null
+                  },
+                  {
+                      "id":  "M7-02",
+                      "title":  "完成实际试玩与稳定性验收",
+                      "depends_on":  [
+                                         "M6-04",
+                                         "M7-01"
+                                     ],
+                      "priority":  "P2",
+                      "outputs":  [
+                                      "多路线实际试玩反馈",
+                                      "回归/迁移/性能报告",
+                                      "剩余问题分级"
+                                  ],
+                      "acceptance":  [
+                                         "玩家反馈与自动检查分列，不由Agent代填真人感受",
+                                         "严重状态损坏与主路径阻断清零于规定测试集",
+                                         "不通过的体验目标进入下一轮具体任务"
+                                     ],
+                      "status":  "todo",
+                      "owner":  null,
+                      "evidence":  [
+
+                                   ],
+                      "commit_sha":  null,
+                      "remote_sha":  null,
+                      "pr_url":  null
+                  },
+                  {
+                      "id":  "M7-03",
+                      "title":  "交付可回滚的发布候选",
+                      "depends_on":  [
+                                         "M7-02"
+                                     ],
+                      "priority":  "P2",
+                      "outputs":  [
+                                      "实际导出配置与平台构建",
+                                      "变更日志/兼容说明",
+                                      "候选版本和回滚点"
+                                  ],
+                      "acceptance":  [
+                                         "在声明平台实际启动候选构建并完成冒烟",
+                                         "可定位commit、引擎版本、内容哈希和产物",
+                                         "公开发布/合并依据已有授权和分支规则；未获授权时保留可审阅候选"
+                                     ],
+                      "status":  "todo",
+                      "owner":  null,
+                      "evidence":  [
+
+                                   ],
+                      "commit_sha":  null,
+                      "remote_sha":  null,
+                      "pr_url":  null
+                  }
+              ]
+}
