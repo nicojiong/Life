@@ -1,4 +1,4 @@
-{
+﻿{
   "planning_version": "1.0",
   "recorded_at": "2026-10-24",
   "timezone": "Asia/Shanghai",
@@ -14,8 +14,8 @@
   "task_status": "pushed",
   "branch": "agent/M0-01-baseline",
   "base_sha": "2d035379f21abbc8d1d6f06d0328eb756751b993",
-  "commit_sha": null,
-  "remote_sha": null,
+  "commit_sha": "af2e75ebd1aafaac8dfb73ada64502311e1b7a09",
+  "remote_sha": "af2e75ebd1aafaac8dfb73ada64502311e1b7a09",
   "pr_url": null,
   "ci_status": "not_configured",
   "integrated_sha": null,
