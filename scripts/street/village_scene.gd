@@ -2206,7 +2206,7 @@ func _run_verify_smoke() -> void:
 		fails.append("household_cost_pov_consistent")
 		print("[VERIFY] FAIL household_cost_pov_consistent ", hh_child, " ", hh_father, " ", hh_mother)
 
-	# M2-01b：事件绑定承受者——切视角不换人，主体死了按策略处理，存读档保持
+	# M2-01b：事件绑定承受者——用例自带起点，不依赖前序用例的状态
 	var keep_ev_pov := pov
 	var keep_ev_inst: Array = (event_instances as Array).duplicate(true)
 	var keep_ev_seq := event_seq
@@ -2214,23 +2214,36 @@ func _run_verify_smoke() -> void:
 	var keep_ev_age := age
 	var keep_ev_hp := health
 	var keep_ev_money := money
+	var keep_ev_dead: Dictionary = (parent_dead as Dictionary).duplicate(true)
+	var keep_ev_facts: Array = (facts as Array).duplicate(true)
 	events_enabled = false
+	# 干净起点：父母都活着、视角回到孩子、队列与事实清空
+	ended = false
+	parent_dead["father"] = false
+	parent_dead["mother"] = false
+	parents_alive = 2
 	if pov != "child":
 		_switch_pov("child")
 	event_instances = []
 	event_seq = 0
-	# 1) 给孩子排一条，切到父亲后到期：仍然只伤到孩子
+	facts = []
+	fact_seq = 0
 	age = 20
 	health = 80.0
-	var child_hp_before := health
+	lifespan = 60
+	actor_vitals["child"] = {"age": 20, "health": 80.0, "lifespan": 60}
 	actor_vitals["father"] = {"age": 34, "health": 70.0, "lifespan": 80}
+	actor_vitals["mother"] = {"age": 32, "health": 70.0, "lifespan": 80}
+	var child_hp_before := 80.0
+	_enqueue_event("drought", "test", _month_index(), 0, "child", "cancel")
+	var queued_for_child: bool = event_instances.size() == 1 \
+		and str((event_instances[0] as Dictionary).get("target", "")) == "child"
 	_switch_pov("father")
-	age = 34
-	health = 70.0
+	var switched_ok: bool = pov == "father" and age == 34
 	var father_hp_before := health
-	_drain_due_events()
+	var fired_once := _drain_due_events()
 	_switch_pov("child")
-	var child_hit: bool = health < child_hp_before
+	var child_hit: bool = fired_once == 1 and health < child_hp_before
 	var father_untouched: bool = is_equal_approx(father_hp_before, float(_vitals_of("father")["health"]))
 	parent_dead["father"] = true
 	var money_before_cancel := money
@@ -2267,13 +2280,13 @@ func _run_verify_smoke() -> void:
 	health = keep_ev_hp
 	if pov != keep_ev_pov:
 		_switch_pov(keep_ev_pov)
-	var ev_bind_ok: bool = child_hit and father_untouched and cancelled_ok and restore_ok and once_ok
+	var ev_bind_ok: bool = switched_ok and queued_for_child and child_hit and father_untouched and cancelled_ok and restore_ok and once_ok
 	if ev_bind_ok:
 		oks += 1
-		print("[VERIFY] PASS event_actor_binding child=", child_hit, " father=", father_untouched, " cancel=", cancelled_ok, " restore=", restore_ok, " once=", once_ok)
+		print("[VERIFY] PASS event_actor_binding switched=", switched_ok, " queued=", queued_for_child, " child=", child_hit, " father=", father_untouched, " cancel=", cancelled_ok, " restore=", restore_ok, " once=", once_ok)
 	else:
 		fails.append("event_actor_binding")
-		print("[VERIFY] FAIL event_actor_binding child=", child_hit, " father=", father_untouched, " cancel=", cancelled_ok, " restore=", restore_ok, " once=", once_ok)
+		print("[VERIFY] FAIL event_actor_binding switched=", switched_ok, " queued=", queued_for_child, " child=", child_hit, " father=", father_untouched, " cancel=", cancelled_ok, " restore=", restore_ok, " once=", once_ok)
 
 	# M2-01c：取消不算发生过；非当前人物扣血也要走死亡结算；旧档缺主体显式取消
 	var keep_c_inst: Array = (event_instances as Array).duplicate(true)

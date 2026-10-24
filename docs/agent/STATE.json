@@ -11,7 +11,7 @@
     "remote_mutations_performed":  true,
     "current_task":  "连续运行 vs 真实退出重载续跑",
     "next_task":  "连续运行 vs 真实退出重载续跑",
-    "task_status":  "M2-01e-pushed",
+    "task_status":  "binding-test-restored",
     "branch":  "agent/M1-ci-workflow",
     "base_sha":  "bf0846f1c20cbcf4dd0cf5f5707b0cf1c88e12cb",
     "commit_sha":  "c0a6cfebf864bb7dfb02e8dba76475ba4e97b972",
