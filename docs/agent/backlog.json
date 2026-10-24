@@ -190,10 +190,11 @@
                                          "调整相机/视觉随机不改变模拟结果",
                                          "事件有cause_ids，ID与排序规则稳定，未知因果显式标注"
                                      ],
-                      "status":  "todo",
+                      "status":  "in_progress",
                       "owner":  null,
                       "evidence":  [
-
+                                       "docs/verification/M1-03a.md",
+                                       "docs/tasks/M1-03.md"
                                    ],
                       "commit_sha":  null,
                       "remote_sha":  null,

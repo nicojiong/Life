@@ -105,7 +105,7 @@ var women_rank := 0
 var month_frac := 0.0
 
 ## 存档格式版本：字段增删时递增，读档据此做迁移
-const SAVE_SCHEMA_VERSION := 3
+const SAVE_SCHEMA_VERSION := 4
 var save_schema_seen := 0
 ## A03：父母是否已故（保留人物记录，不用删除表示死亡）
 var parent_dead := {"father": false, "mother": false}
@@ -115,6 +115,27 @@ var recovered_from_backup := false
 var action_cooldown := {}
 ## M1-02b：年关结算水位，保证一年只结算一次
 var last_settled_year := 0
+
+## M1-03：模拟专用随机流（与画面/游走的随机分开），可存可复现
+var sim_rng := RandomNumberGenerator.new()
+var sim_seed := 0
+
+
+func _init_sim_rng(s: int) -> void:
+	sim_seed = s
+	sim_rng.seed = s
+
+
+func _rnd() -> float:
+	return sim_rng.randf()
+
+
+func _rndi(a: int, b: int) -> int:
+	return sim_rng.randi_range(a, b)
+
+
+func _rndf(a: float, b: float) -> float:
+	return sim_rng.randf_range(a, b)
 
 var _re_time := RegEx.new()
 
@@ -284,6 +305,9 @@ var panel_hint: Label
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	# 模拟随机流先于身份生成初始化：同种子得到同一份出身与一生
+	var boot := int(Time.get_ticks_usec()) ^ randi()
+	_init_sim_rng(boot)
 	_init_identity()
 	var resumed := _load_game()
 	_rebuild()
@@ -335,6 +359,8 @@ func _state_dict() -> Dictionary:
 		"time_scale": time_scale, "slot": slot,
 		"parent_dead": parent_dead, "parent_death_year": parent_death_year,
 		"action_cooldown": action_cooldown, "last_settled_year": last_settled_year,
+		# RNG 的 64 位 seed/state 用十进制字符串，避免 JSON 精度丢失
+		"sim_seed": str(sim_seed), "sim_state": str(sim_rng.state),
 		"px": player.x, "py": player.y, "hour": hour,
 		"birth_year": birth_year, "father_name": father_name, "mother_name": mother_name,
 	}
@@ -488,6 +514,10 @@ func _load_game() -> bool:
 	if d.get("action_cooldown") is Dictionary:
 		action_cooldown = d["action_cooldown"]
 	last_settled_year = int(d.get("last_settled_year", last_settled_year))
+	if d.has("sim_seed") and d.has("sim_state"):
+		sim_seed = int(str(d["sim_seed"]))
+		sim_rng.seed = sim_seed
+		sim_rng.state = int(str(d["sim_state"]))
 	save_schema_seen = int(d.get("schema_version", 1))
 	return true
 
@@ -988,6 +1018,31 @@ func _run_verify_smoke() -> void:
 	health = keep_hp2
 	money = keep_money3
 
+	# M1-03：同种子得到同一串抽取；存读档后抽取接着走
+	_init_sim_rng(12345)
+	var seq_a: Array = []
+	for i in range(6):
+		seq_a.append(_rndi(0, 99))
+	_init_sim_rng(12345)
+	var seq_b: Array = []
+	for i in range(6):
+		seq_b.append(_rndi(0, 99))
+	_init_sim_rng(777)
+	_rndi(0, 99)
+	_save_game()
+	var expected_next := _rndi(0, 999)
+	_init_sim_rng(1)
+	var ok_rng_load := _load_game()
+	var actual_next := _rndi(0, 999)
+	if seq_a == seq_b and ok_rng_load and actual_next == expected_next:
+		oks += 1
+		print("[VERIFY] PASS rng_reproducible seq=", seq_a.slice(0, 3), " resume=", actual_next)
+	else:
+		fails.append("rng_reproducible")
+		print("[VERIFY] FAIL rng_reproducible same=", seq_a == seq_b,
+			" loaded=", ok_rng_load, " expected=", expected_next, " actual=", actual_next)
+	_init_sim_rng(4242)
+
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
 	var keep_age := age
@@ -1330,7 +1385,10 @@ func _clear_save() -> void:
 
 func _init_identity() -> void:
 	var r := RandomNumberGenerator.new()
-	r.randomize()
+	if sim_seed != 0:
+		r.seed = sim_seed
+	else:
+		r.randomize()
 	var o: Dictionary = DB.pick_origin(r)
 	var nm: Dictionary = DB.make_name(r, "男")
 	name_text = str(nm["full"])
@@ -3552,7 +3610,7 @@ func _apply_special(s: String) -> void:
 			"你回家把针线盒擦了一遍，坐在灯下绣到三更。",
 		], false)
 	elif s == "w_midwife":
-		if randf() < 0.85:
+		if _rnd() < 0.85:
 			fame = minf(100.0, fame + 5.0)
 			_toast("母子平安。主家给你包了红纸，还提了一篮鸡蛋。", Color(0.30, 0.42, 0.22))
 		else:
@@ -3575,7 +3633,7 @@ func _apply_special(s: String) -> void:
 			"你摸了摸袖口那方旧帕子——那是你绣的第一件。",
 		], false)
 	elif s == "stall":
-		var earn := 300 + randi_range(0, 600)
+		var earn := 300 + _rndi(0, 600)
 		money += earn
 		fame = minf(100.0, fame + 1.0)
 		if trade_rank == 0:
@@ -3585,12 +3643,12 @@ func _apply_special(s: String) -> void:
 		else:
 			_toast("一个月下来赚了 %d 文，被差役撵了两回。" % earn, Color(0.30, 0.26, 0.21))
 	elif s == "caravan":
-		if randf() < 0.6:
-			var gain := randi_range(2000, 3600)
+		if _rnd() < 0.6:
+			var gain := _rndi(2000, 3600)
 			money += gain
 			_toast("这趟货卖得顺，赚了 %d 文。" % gain, Color(0.30, 0.42, 0.22))
 		else:
-			var loss := randi_range(400, 1000)
+			var loss := _rndi(400, 1000)
 			money = maxi(0, money - loss)
 			_toast("路上连日下雨，货烂了一半，亏了 %d 文。" % loss, Color(0.62, 0.24, 0.18))
 	elif s == "sedentary":
@@ -3636,7 +3694,7 @@ func _apply_special(s: String) -> void:
 			"你背着箱子出门，觉得箱子比想的沉。",
 		], false)
 	elif s == "med_visit":
-		if randf() < 0.75:
+		if _rnd() < 0.75:
 			money += 2200
 			fame = minf(100.0, fame + 4.0)
 			_toast("这一趟治好了，主家塞给你两贯钱，还提了一篮鸡蛋。", Color(0.30, 0.42, 0.22))
@@ -3711,7 +3769,7 @@ func _apply_special(s: String) -> void:
 		_leave_old_line("mil")
 		_toast("你报了名，领一口刀、两斗米。名册上不写名字，写「某乡某人」。", Color(0.30, 0.26, 0.21))
 	elif s == "expedition":
-		if randf() < 0.10:
+		if _rnd() < 0.10:
 			death_cause = "战死"
 			_die_young()
 			return
@@ -3720,7 +3778,7 @@ func _apply_special(s: String) -> void:
 		health = maxf(0.0, health - 6.0)
 		_toast("这一仗打完了，你在死人堆里坐了很久。战功记了一次。", Color(0.30, 0.26, 0.21))
 	elif s == "expedition2":
-		if randf() < 0.08:
+		if _rnd() < 0.08:
 			death_cause = "战死"
 			_die_young()
 			return
@@ -3743,7 +3801,7 @@ func _apply_special(s: String) -> void:
 			"你穿上新甲走到校场，看底下的人跟你从前一样站着。",
 		], false)
 	elif s == "patrol":
-		if randf() < 0.12:
+		if _rnd() < 0.12:
 			death_cause = "战死"
 			_die_young()
 			return
@@ -3767,7 +3825,7 @@ func _apply_special(s: String) -> void:
 			bonus_note if bonus_note != "" else "案上堆着没批完的状子，最上面一张写着「田界」。",
 		], false)
 	elif s == "judge_fair":
-		if randf() < 0.60:
+		if _rnd() < 0.60:
 			gov_merit += 2
 			fame = minf(100.0, fame + 3.0)
 			_toast("判得公，两造都服。县里传你是个明白官。", Color(0.30, 0.42, 0.22))
@@ -3802,7 +3860,7 @@ func _apply_special(s: String) -> void:
 		_toast("你递了告老的状子。回乡那天，只有两个老吏送到城外。", Color(0.30, 0.26, 0.21))
 	elif s == "jieshi":
 		var p := clampf(0.10 + learning * 0.010, 0.05, 0.90)
-		if randf() < p:
+		if _rnd() < p:
 			story["举人"] = true
 			fame = minf(100.0, fame + 18.0)
 			_play_cutscene("解 试", [
@@ -3815,7 +3873,7 @@ func _apply_special(s: String) -> void:
 			_toast("解试落第。你在贡院外站到人都散了。", Color(0.62, 0.24, 0.18))
 	elif s == "shengshi":
 		var p2 := clampf(-0.08 + learning * 0.008, 0.04, 0.85)
-		if randf() < p2:
+		if _rnd() < p2:
 			story["进士"] = true
 			fame = minf(100.0, fame + 30.0)
 			money += 4000
@@ -3849,9 +3907,9 @@ func _advance_months(n: int) -> void:
 			return
 		month += 1
 		if shop_open:
-			shop["market"] = clampf(float(shop.get("market", 1.0)) + randf_range(-0.045, 0.045), 0.70, 1.40)
-			if randf() < 0.10:
-				shop["rival"] = randi_range(0, 2)
+			shop["market"] = clampf(float(shop.get("market", 1.0)) + _rndf(-0.045, 0.045), 0.70, 1.40)
+			if _rnd() < 0.10:
+				shop["rival"] = _rndi(0, 2)
 		if month > 12:
 			month = 1
 			year += 1
@@ -4048,7 +4106,7 @@ func _event_ok(ev: Dictionary) -> bool:
 
 
 func _roll_event() -> void:
-	if randf() > 0.32:
+	if _rnd() > 0.32:
 		return
 	var pool: Array = []
 	for e in EVENTS:
