@@ -107,6 +107,8 @@ var month_frac := 0.0
 ## 存档格式版本：字段增删时递增，读档据此做迁移
 const SAVE_SCHEMA_VERSION := 6
 var save_schema_seen := 0
+## 读到更高版本的存档后置位：拒绝加载、拒绝覆盖
+var save_future := false
 ## A03：父母是否已故（保留人物记录，不用删除表示死亡）
 var parent_dead := {"father": false, "mother": false}
 var parent_death_year := {"father": 0, "mother": 0}
@@ -391,6 +393,10 @@ func _save_game() -> void:
 	if ended:
 		print("[SAVE] refused_after_end")
 		return
+	# A02：读到更高版本的存档后不再写盘，避免把新格式降级覆盖
+	if save_future:
+		print("[SAVE] refused_future_save")
+		return
 	# 原子写入：先写 .tmp → 旧的挪成 .bak → .tmp 顶上去；中途断电最多丢一次写入
 	var main := _save_file()
 	var tmp := main + ".tmp"
@@ -440,6 +446,12 @@ func _load_game() -> bool:
 			recovered_from_backup = true
 			print("[SAVE] recovered_from_backup")
 	if d.is_empty():
+		return false
+	# A02：更高版本（未来存档）只读拒绝，既不加载也不覆盖
+	var file_ver := int(d.get("schema_version", 1))
+	if file_ver > SAVE_SCHEMA_VERSION:
+		save_future = true
+		print("[SAVE] future_version ", file_ver, " > ", SAVE_SCHEMA_VERSION)
 		return false
 	name_text = str(d.get("name", name_text))
 	place = str(d.get("place", place))
@@ -679,7 +691,7 @@ func _child_year() -> void:
 				pool.append(e)
 	if pool.is_empty():
 		return
-	var ev: Dictionary = pool[randi() % pool.size()]
+	var ev: Dictionary = _pick_from(pool)
 	child_last = str(ev["id"])
 	_apply_child_event(child_last)
 
@@ -1129,6 +1141,111 @@ func _run_verify_smoke() -> void:
 			" load=", att_after_load)
 	relations = {}
 
+	# 行动标识稳定：有 id 时改文案/月数仍是同一个冷却；没有 id 时按内容签名
+	var key_a := _action_key({"label": "读书", "months": 1, "gain": {"learning": 1}})
+	var key_b := _action_key({"label": "读书", "months": 1, "gain": {"learning": 1}})
+	var key_c := _action_key({"id": "study", "label": "读书", "months": 1})
+	var key_d := _action_key({"id": "study", "label": "苦读", "months": 3})
+	if key_a == key_b and key_c == key_d and key_a != key_c:
+		oks += 1
+		print("[VERIFY] PASS action_key_stable sig=", key_b, " id=", key_c)
+	else:
+		fails.append("action_key_stable")
+		print("[VERIFY] FAIL action_key_stable ", key_a, " / ", key_b, " / ", key_c, " / ", key_d)
+
+	# 事件挑选走已保存的模拟流：推进全局 RNG 不影响同一 seed 的选择
+	var pool := [{"id": "a"}, {"id": "b"}, {"id": "c"}, {"id": "d"}, {"id": "e"}, {"id": "f"}]
+	_init_sim_rng(4242)
+	var pick1 := str(_pick_from(pool)["id"])
+	for i in range(9):
+		randf()
+	_init_sim_rng(4242)
+	var pick2 := str(_pick_from(pool)["id"])
+	if pick1 == pick2:
+		oks += 1
+		print("[VERIFY] PASS events_use_saved_rng pick=", pick1)
+	else:
+		fails.append("events_use_saved_rng")
+		print("[VERIFY] FAIL events_use_saved_rng ", pick1, " != ", pick2)
+
+	# 未来版本的存档：拒绝加载、也拒绝覆盖
+	var fut := _state_dict()
+	fut["schema_version"] = SAVE_SCHEMA_VERSION + 1
+	var fw := FileAccess.open(_save_file(), FileAccess.WRITE)
+	if fw != null:
+		fw.store_string(JSON.stringify(fut))
+		fw.close()
+	var fut_before := _read_save_dict(_save_file())
+	save_future = false
+	var ok_fut := _load_game()
+	_save_game()
+	var fut_after := _read_save_dict(_save_file())
+	var fut_kept: bool = int(fut_after.get("schema_version", 0)) == SAVE_SCHEMA_VERSION + 1
+	if (not ok_fut) and save_future and fut_kept and not fut_before.is_empty():
+		oks += 1
+		print("[VERIFY] PASS save_rejects_future_version kept=", fut_after.get("schema_version", 0))
+	else:
+		fails.append("save_rejects_future_version")
+		print("[VERIFY] FAIL save_rejects_future_version loaded=", ok_fut,
+			" future_flag=", save_future, " kept=", fut_kept)
+	save_future = false
+
+	# 父母死亡只结算一次：重复调用不得再扣 parents_alive 或再记一条
+	parent_dead["father"] = false
+	parent_death_year["father"] = 0
+	parents_alive = 2
+	_switch_pov("father")
+	var death_facts_before := 0
+	for f in facts:
+		if str((f as Dictionary).get("kind", "")) == "death":
+			death_facts_before += 1
+	_parent_death()
+	var alive_after_first := parents_alive
+	pov = "father"  # 强行回到父亲视角，模拟重复结算
+	_parent_death()
+	var alive_after_second := parents_alive
+	var death_facts_after := 0
+	for f in facts:
+		if str((f as Dictionary).get("kind", "")) == "death":
+			death_facts_after += 1
+	if alive_after_first == 1 and alive_after_second == 1 \
+			and death_facts_after == death_facts_before + 1:
+		oks += 1
+		print("[VERIFY] PASS parent_death_settled_once alive=", alive_after_second)
+	else:
+		fails.append("parent_death_settled_once")
+		print("[VERIFY] FAIL parent_death_settled_once first=", alive_after_first,
+			" second=", alive_after_second, " facts=", death_facts_before, "->", death_facts_after)
+	pov = "child"
+	parent_dead["father"] = false
+	parent_death_year["father"] = 0
+	parents_alive = 2
+
+	# 父亲在长行动中死去：视角切回孩子，这份收益不能记到孩子头上
+	var keep_money4 := money
+	var keep_age4 := age
+	var keep_life4 := lifespan
+	money = 1000
+	_switch_pov("father")
+	age = lifespan
+	health = 50.0
+	parent_dead["father"] = false
+	_on_action({"label": "守灵长活", "months": 12, "gain": {"money": 5000}})
+	var reward_ok: bool = money == 1000 and pov == "child" and bool(parent_dead.get("father", false))
+	if reward_ok:
+		oks += 1
+		print("[VERIFY] PASS action_pov_change_no_reward money=", money, " pov=", pov)
+	else:
+		fails.append("action_pov_change_no_reward")
+		print("[VERIFY] FAIL action_pov_change_no_reward money=", money, " pov=", pov,
+			" dead=", parent_dead)
+	parent_dead["father"] = false
+	parent_death_year["father"] = 0
+	parents_alive = 2
+	money = keep_money4
+	age = keep_age4
+	lifespan = keep_life4
+
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
 	var keep_age := age
@@ -1295,7 +1412,7 @@ func debug_events() -> void:
 			if _event_ok(e):
 				pool.append(e)
 		if not pool.is_empty():
-			seen[str(pool[randi() % pool.size()]["id"])] = true
+			seen[str(_pick_from(pool)["id"])] = true
 	print("[EVT] 可达事件种类=", seen.size(), " ", seen.keys())
 	_set_att("zhang_tu", 0)
 	print("[MEM] 张屠户 态度 0 → 肉价 ", _meat_price())
@@ -2731,7 +2848,7 @@ func _on_dialog_choice(ch: Dictionary, id: String) -> void:
 		_toast("钱不够。", Color(0.62, 0.24, 0.18))
 		return
 	# M1-02：对话与地点行动共用同一套冷却结算，且都不再推进月份
-	if not _cooldown_ready(str(ch.get("label", ""))):
+	if not _cooldown_ready(_action_key(ch)):
 		return
 	money -= cost
 	if ch.has("once"):
@@ -2747,7 +2864,7 @@ func _on_dialog_choice(ch: Dictionary, id: String) -> void:
 	panel.visible = false
 	busy = false
 	_unfreeze_npc(id)
-	_cooldown_commit(str(ch.get("label", "")), int(ch.get("months", 1)))
+	_cooldown_commit(_action_key(ch), int(ch.get("months", 1)))
 	# M1-02：对话不再额外推进月份，时间由世界钟与节令推进
 	if ch.has("result"):
 		_toast(str(ch["result"]), Color(0.30, 0.26, 0.21))
@@ -2763,6 +2880,13 @@ func _on_dialog_choice(ch: Dictionary, id: String) -> void:
 
 func _parent_death() -> void:
 	var who := pov
+	# 孩子本人不走"送父母"这条路径
+	if who == "child":
+		return
+	# A03/A06：死亡结算只能发生一次，重复调用不得再扣 parents_alive 或再发一次讣告
+	if bool(parent_dead.get(who, false)):
+		print("[DEATH] already_settled ", who)
+		return
 	var nm := father_name if who == "father" else mother_name
 	var p_age := age
 	var kid_age := int((pov_state.get("child", {}) as Dictionary).get("age", 0))
@@ -3493,6 +3617,24 @@ func _month_index() -> int:
 	return year * 12 + month
 
 
+func _action_key(act: Dictionary) -> String:
+	# 冷却键优先用行动自带的稳定 id；没有 id 时退回内容签名（标签 + 月数 + 效果），
+	# 保证改文案不会换掉冷却、也不会让两个不同行动共用一个冷却。
+	var aid := str(act.get("id", ""))
+	if aid != "":
+		return "id:" + aid
+	var sig := str(act.get("label", ""))
+	if act.has("months"):
+		sig += "|m" + str(act["months"])
+	if act.has("special"):
+		sig += "|s" + str(act["special"])
+	if act.get("gain") is Dictionary:
+		var keys: Array = (act["gain"] as Dictionary).keys()
+		keys.sort()
+		sig += "|g" + ",".join(keys)
+	return "sig:" + sig
+
+
 func _cooldown_ready(label: String) -> bool:
 	# 同一件事在冷却期内不能再做（冷却从"这次做完之后"开始算）
 	if label == "":
@@ -3526,12 +3668,13 @@ func _on_action(act: Dictionary) -> void:
 				return
 
 	# M1-02：冷却检查必须在扣钱、关面板之前
-	if not _cooldown_ready(str(act.get("label", ""))):
+	if not _cooldown_ready(_action_key(act)):
 		return
 
 	money -= cost
 	panel.visible = false
 	busy = false
+	var acting_pov := pov
 	# 平常做事不花时间，时间自己走；只有"大事"（半年以上的活）才跳过一段
 	var m := int(act.get("months", 1))
 	if m >= 6:
@@ -3539,6 +3682,10 @@ func _on_action(act: Dictionary) -> void:
 		# A01：跳过的时间可能已经把人跳死了，死亡优先于本次行动的收益
 		if ended:
 			print("[ACTION] interrupted_before_reward ", str(act.get("label", "")))
+			return
+		# 父母在跳时中死去会把视角切回孩子：这份收益不能记到孩子头上
+		if pov != acting_pov:
+			print("[ACTION] interrupted_by_pov_change ", acting_pov, "->", pov)
 			return
 	if act.has("gain"):
 		_apply_gain(act["gain"])
@@ -3548,10 +3695,13 @@ func _on_action(act: Dictionary) -> void:
 		if ended:
 			print("[ACTION] interrupted_after_special ", str(act.get("label", "")))
 			return
+		if pov != acting_pov:
+			print("[ACTION] interrupted_by_pov_change ", acting_pov, "->", pov)
+			return
 	if act.has("flag"):
 		story[str(act["flag"])] = true
 	# M1-02：结算完成后才开始计时，长期行动已用自己的 months 付过账
-	_cooldown_commit(str(act.get("label", "")), int(act.get("months", 1)))
+	_cooldown_commit(_action_key(act), int(act.get("months", 1)))
 	if act.has("flavor"):
 		_toast(str(act["flavor"]), Color(0.30, 0.26, 0.21))
 	var got_money := false
@@ -3898,7 +4048,7 @@ func _apply_special(s: String) -> void:
 	elif s == "take_post":
 		office_rank = 1
 		var names := ["吴县", "长洲", "常熟", "昆山", "嘉定", "华亭"]
-		county = str(names[randi() % names.size()])
+		county = str(_pick_from(names))
 		var bonus_note := ""
 		if mil_rank >= 2:
 			gov_merit += 2
@@ -4195,6 +4345,13 @@ func _event_ok(ev: Dictionary) -> bool:
 	return true
 
 
+func _pick_from(pool: Array) -> Dictionary:
+	# 事件与城名等随机挑选必须走可复现的模拟流，不能用未保存的全局 RNG
+	if pool.is_empty():
+		return {}
+	return pool[_rndi(0, pool.size() - 1)]
+
+
 func _roll_event() -> void:
 	if not events_enabled:
 		return
@@ -4206,7 +4363,7 @@ func _roll_event() -> void:
 			pool.append(e)
 	if pool.is_empty():
 		return
-	var ev: Dictionary = pool[randi() % pool.size()]
+	var ev: Dictionary = _pick_from(pool)
 	_apply_event(str(ev["id"]))
 
 
