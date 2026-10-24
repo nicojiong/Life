@@ -14,7 +14,7 @@
     "task_status":  "integration-verified",
     "branch":  "16 个 agent/* 堆叠分支（见 docs/DELIVERY_M1.md）",
     "base_sha":  "bf0846f1c20cbcf4dd0cf5f5707b0cf1c88e12cb",
-    "commit_sha":  "07fbe20d45fa6d8ce4c9ff0914471a74b2a92401",
+    "commit_sha":  "",
     "remote_sha":  "07fbe20d45fa6d8ce4c9ff0914471a74b2a92401",
     "pr_url":  null,
     "ci_status":  "green (run 40051930378 @ e893052)",
@@ -24,5 +24,5 @@
                      "docs/BASELINE.md",
                      "docs/tasks/M0-01.md"
                  ],
-    "next_step":  "开汇总 PR（无 token，需人工点 compare）；随后 M1-03 五类随机流与 M1-05 黄金重放"
+    "next_step":  "M1-05 黄金重放；或先做 M1-01b actor 状态收拢"
 }

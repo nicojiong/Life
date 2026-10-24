@@ -105,7 +105,7 @@ var women_rank := 0
 var month_frac := 0.0
 
 ## 存档格式版本：字段增删时递增，读档据此做迁移
-const SAVE_SCHEMA_VERSION := 6
+const SAVE_SCHEMA_VERSION := 7
 var save_schema_seen := 0
 ## 读到更高版本的存档后置位：拒绝加载、拒绝覆盖
 var save_future := false
@@ -119,25 +119,40 @@ var action_cooldown := {}
 var last_settled_year := 0
 
 ## M1-03：模拟专用随机流（与画面/游走的随机分开），可存可复现
-var sim_rng := RandomNumberGenerator.new()
+## M1-03d：三条可保存的模拟流（出生 / 世界 / 人物决策）
+## render 与 debug 不进这组：表现层随机用各自动作里的局部 RNG，绝不参与模拟
+var rng_world := RandomNumberGenerator.new()
+var rng_actor := RandomNumberGenerator.new()
+var rng_birth := RandomNumberGenerator.new()
 var sim_seed := 0
 
 
 func _init_sim_rng(s: int) -> void:
+	# 三条流从同一个基底种子派生，彼此独立
 	sim_seed = s
-	sim_rng.seed = s
+	rng_world.seed = s
+	rng_actor.seed = s + 1
+	rng_birth.seed = s + 2
 
 
 func _rnd() -> float:
-	return sim_rng.randf()
+	return rng_world.randf()
 
 
 func _rndi(a: int, b: int) -> int:
-	return sim_rng.randi_range(a, b)
+	return rng_world.randi_range(a, b)
 
 
 func _rndf(a: float, b: float) -> float:
-	return sim_rng.randf_range(a, b)
+	return rng_world.randf_range(a, b)
+
+
+func _arnd() -> float:
+	return rng_actor.randf()
+
+
+func _arndi(a: int, b: int) -> int:
+	return rng_actor.randi_range(a, b)
 
 
 ## M1-03b：事实日志。每条记"什么时候、什么类型、由什么引起"，供墓志与调试追溯
@@ -378,7 +393,9 @@ func _state_dict() -> Dictionary:
 		"action_cooldown": action_cooldown, "last_settled_year": last_settled_year,
 		"facts": facts, "relations": relations,
 		# RNG 的 64 位 seed/state 用十进制字符串，避免 JSON 精度丢失
-		"sim_seed": str(sim_seed), "sim_state": str(sim_rng.state),
+		"sim_seed": str(sim_seed),
+		"sim_state": str(rng_world.state), "rng_actor_state": str(rng_actor.state),
+		"rng_birth_state": str(rng_birth.state),
 		"px": player.x, "py": player.y, "hour": hour,
 		"birth_year": birth_year, "father_name": father_name, "mother_name": mother_name,
 	}
@@ -548,8 +565,12 @@ func _load_game() -> bool:
 		relations = d["relations"]
 	if d.has("sim_seed") and d.has("sim_state"):
 		sim_seed = int(str(d["sim_seed"]))
-		sim_rng.seed = sim_seed
-		sim_rng.state = int(str(d["sim_state"]))
+		rng_world.seed = sim_seed
+		rng_world.state = int(str(d["sim_state"]))
+		rng_actor.seed = sim_seed + 1
+		rng_actor.state = int(str(d.get("rng_actor_state", str(rng_actor.state))))
+		rng_birth.seed = sim_seed + 2
+		rng_birth.state = int(str(d.get("rng_birth_state", str(rng_birth.state))))
 	save_schema_seen = int(d.get("schema_version", 1))
 	return true
 
@@ -1078,6 +1099,25 @@ func _run_verify_smoke() -> void:
 			" loaded=", ok_rng_load, " expected=", expected_next, " actual=", actual_next)
 	_init_sim_rng(4242)
 
+	# M1-03d：世界流与人物决策流互不干扰（各自的抽取不影响对方）
+	_init_sim_rng(2025)
+	var actor_seq_a: Array = []
+	for i in range(3):
+		actor_seq_a.append(_arndi(0, 999))
+	_init_sim_rng(2025)
+	for i in range(7):
+		_rndi(0, 999)
+	var actor_seq_b: Array = []
+	for i in range(3):
+		actor_seq_b.append(_arndi(0, 999))
+	if actor_seq_a == actor_seq_b:
+		oks += 1
+		print("[VERIFY] PASS rng_streams_independent actor=", actor_seq_a)
+	else:
+		fails.append("rng_streams_independent")
+		print("[VERIFY] FAIL rng_streams_independent a=", actor_seq_a, " b=", actor_seq_b)
+	_init_sim_rng(4242)
+
 	# M1-03b：事实日志每条都要有类型与起因，时间不回退
 	facts = []
 	_apply_event("drought")
@@ -1156,10 +1196,14 @@ func _run_verify_smoke() -> void:
 	# 事件挑选走已保存的模拟流：推进全局 RNG 不影响同一 seed 的选择
 	var pool := [{"id": "a"}, {"id": "b"}, {"id": "c"}, {"id": "d"}, {"id": "e"}, {"id": "f"}]
 	_init_sim_rng(4242)
+
+
 	var pick1 := str(_pick_from(pool)["id"])
 	for i in range(9):
 		randf()
 	_init_sim_rng(4242)
+
+
 	var pick2 := str(_pick_from(pool)["id"])
 	if pick1 == pick2:
 		oks += 1
@@ -1622,7 +1666,7 @@ func _clear_save() -> void:
 func _init_identity() -> void:
 	var r := RandomNumberGenerator.new()
 	if sim_seed != 0:
-		r.seed = sim_seed
+		r.seed = sim_seed + 2
 	else:
 		r.randomize()
 	var o: Dictionary = DB.pick_origin(r)
@@ -3880,7 +3924,7 @@ func _apply_special(s: String) -> void:
 			"你回家把针线盒擦了一遍，坐在灯下绣到三更。",
 		], false)
 	elif s == "w_midwife":
-		if _rnd() < 0.85:
+		if _arnd() < 0.85:
 			fame = minf(100.0, fame + 5.0)
 			_toast("母子平安。主家给你包了红纸，还提了一篮鸡蛋。", Color(0.30, 0.42, 0.22))
 		else:
@@ -3903,7 +3947,7 @@ func _apply_special(s: String) -> void:
 			"你摸了摸袖口那方旧帕子——那是你绣的第一件。",
 		], false)
 	elif s == "stall":
-		var earn := 300 + _rndi(0, 600)
+		var earn := 300 + _arndi(0, 600)
 		money += earn
 		fame = minf(100.0, fame + 1.0)
 		if trade_rank == 0:
@@ -3913,12 +3957,12 @@ func _apply_special(s: String) -> void:
 		else:
 			_toast("一个月下来赚了 %d 文，被差役撵了两回。" % earn, Color(0.30, 0.26, 0.21))
 	elif s == "caravan":
-		if _rnd() < 0.6:
-			var gain := _rndi(2000, 3600)
+		if _arnd() < 0.6:
+			var gain := _arndi(2000, 3600)
 			money += gain
 			_toast("这趟货卖得顺，赚了 %d 文。" % gain, Color(0.30, 0.42, 0.22))
 		else:
-			var loss := _rndi(400, 1000)
+			var loss := _arndi(400, 1000)
 			money = maxi(0, money - loss)
 			_toast("路上连日下雨，货烂了一半，亏了 %d 文。" % loss, Color(0.62, 0.24, 0.18))
 	elif s == "sedentary":
@@ -3964,7 +4008,7 @@ func _apply_special(s: String) -> void:
 			"你背着箱子出门，觉得箱子比想的沉。",
 		], false)
 	elif s == "med_visit":
-		if _rnd() < 0.75:
+		if _arnd() < 0.75:
 			money += 2200
 			fame = minf(100.0, fame + 4.0)
 			_toast("这一趟治好了，主家塞给你两贯钱，还提了一篮鸡蛋。", Color(0.30, 0.42, 0.22))
@@ -4039,7 +4083,7 @@ func _apply_special(s: String) -> void:
 		_leave_old_line("mil")
 		_toast("你报了名，领一口刀、两斗米。名册上不写名字，写「某乡某人」。", Color(0.30, 0.26, 0.21))
 	elif s == "expedition":
-		if _rnd() < 0.10:
+		if _arnd() < 0.10:
 			death_cause = "战死"
 			_die_young()
 			return
@@ -4048,7 +4092,7 @@ func _apply_special(s: String) -> void:
 		health = maxf(0.0, health - 6.0)
 		_toast("这一仗打完了，你在死人堆里坐了很久。战功记了一次。", Color(0.30, 0.26, 0.21))
 	elif s == "expedition2":
-		if _rnd() < 0.08:
+		if _arnd() < 0.08:
 			death_cause = "战死"
 			_die_young()
 			return
@@ -4071,7 +4115,7 @@ func _apply_special(s: String) -> void:
 			"你穿上新甲走到校场，看底下的人跟你从前一样站着。",
 		], false)
 	elif s == "patrol":
-		if _rnd() < 0.12:
+		if _arnd() < 0.12:
 			death_cause = "战死"
 			_die_young()
 			return
@@ -4095,7 +4139,7 @@ func _apply_special(s: String) -> void:
 			bonus_note if bonus_note != "" else "案上堆着没批完的状子，最上面一张写着「田界」。",
 		], false)
 	elif s == "judge_fair":
-		if _rnd() < 0.60:
+		if _arnd() < 0.60:
 			gov_merit += 2
 			fame = minf(100.0, fame + 3.0)
 			_toast("判得公，两造都服。县里传你是个明白官。", Color(0.30, 0.42, 0.22))
@@ -4130,7 +4174,7 @@ func _apply_special(s: String) -> void:
 		_toast("你递了告老的状子。回乡那天，只有两个老吏送到城外。", Color(0.30, 0.26, 0.21))
 	elif s == "jieshi":
 		var p := clampf(0.10 + learning * 0.010, 0.05, 0.90)
-		if _rnd() < p:
+		if _arnd() < p:
 			story["举人"] = true
 			fame = minf(100.0, fame + 18.0)
 			_log_fact("exam", "jieshi_pass", {"year": year})
@@ -4145,7 +4189,7 @@ func _apply_special(s: String) -> void:
 			_toast("解试落第。你在贡院外站到人都散了。", Color(0.62, 0.24, 0.18))
 	elif s == "shengshi":
 		var p2 := clampf(-0.08 + learning * 0.008, 0.04, 0.85)
-		if _rnd() < p2:
+		if _arnd() < p2:
 			story["进士"] = true
 			fame = minf(100.0, fame + 30.0)
 			money += 4000
@@ -4181,7 +4225,7 @@ func _advance_months(n: int) -> void:
 		month += 1
 		if shop_open:
 			shop["market"] = clampf(float(shop.get("market", 1.0)) + _rndf(-0.045, 0.045), 0.70, 1.40)
-			if _rnd() < 0.10:
+			if _arnd() < 0.10:
 				shop["rival"] = _rndi(0, 2)
 		if month > 12:
 			month = 1
