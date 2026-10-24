@@ -2223,15 +2223,15 @@ func _run_verify_smoke() -> void:
 	age = 20
 	health = 80.0
 	var child_hp_before := health
-	_enqueue_event("drought", "test", _month_index(), 0, "child", "cancel")
+	actor_vitals["father"] = {"age": 34, "health": 70.0, "lifespan": 80}
 	_switch_pov("father")
+	age = 34
+	health = 70.0
 	var father_hp_before := health
 	_drain_due_events()
 	_switch_pov("child")
 	var child_hit: bool = health < child_hp_before
 	var father_untouched: bool = is_equal_approx(father_hp_before, float(_vitals_of("father")["health"]))
-	# 2) 主体在到期前死亡 → 取消，不落到当前操控者身上
-	event_instances = []
 	parent_dead["father"] = true
 	var money_before_cancel := money
 	_enqueue_event("drought", "test", _month_index(), 0, "father", "cancel")
@@ -2466,6 +2466,75 @@ func _run_verify_smoke() -> void:
 	else:
 		fails.append("death_settlement")
 		print("[VERIFY] FAIL death_settlement killed=", child_killed, " aged=", child_aged_out, " kin=", kin_once, " transfer=", transfer_ok, " refuse=", refuse_ok)
+
+	# M2-01e：事件致死必须在本次月推进内结束；结束后不再执行同月后续事件
+	var keep_e_inst: Array = (event_instances as Array).duplicate(true)
+	var keep_e_seq := event_seq
+	var keep_e_facts: Array = (facts as Array).duplicate(true)
+	var keep_e_pov := pov
+	var keep_e_ended := ended
+	var keep_e_money := money
+	var keep_e_vitals: Dictionary = (actor_vitals as Dictionary).duplicate(true)
+	var keep_e_events := events_enabled
+	var keep_e_dead: Dictionary = (parent_dead as Dictionary).duplicate(true)
+	events_enabled = false
+	ended = false
+	if pov != "child":
+		_switch_pov("child")
+	# 1) 次月到期的致命事件：推进这一个月就要 ended
+	age = 10
+	health = 1.0
+	lifespan = 60
+	actor_vitals["child"] = {"age": 10, "health": 1.0, "lifespan": 60}
+	event_instances = []
+	event_seq = 0
+	_enqueue_event("drought", "test", _month_index() + 1, 0, "child", "cancel")
+	_advance_months(1)
+	var killed_in_month: bool = ended
+	# 2) 同一月里：孩子被旱灾致死（-700）后，母亲的 +1200 不得执行
+	ended = false
+	parent_dead["father"] = false
+	parent_dead["mother"] = false
+	parents_alive = 2
+	money = 1000
+	if pov != "father":
+		_switch_pov("father")
+	age = 30
+	health = 80.0
+	lifespan = 70
+	actor_vitals["child"] = {"age": 10, "health": 1.0, "lifespan": 60}
+	actor_vitals["mother"] = {"age": 28, "health": 80.0, "lifespan": 70}
+	facts = []
+	fact_seq = 0
+	event_instances = []
+	event_seq = 0
+	_enqueue_event("drought", "test", _month_index(), 0, "child", "cancel")
+	_enqueue_event("reward", "test", _month_index(), 0, "mother", "cancel")
+	_advance_months(1)
+	var stopped_after_death: bool = ended and money == 300
+	var money_at_stop := money
+	var reward_not_recorded := _count_facts("event") == 1
+	var kill_ok: bool = killed_in_month and stopped_after_death and reward_not_recorded
+	ended = keep_e_ended
+	money = keep_e_money
+	age = 10
+	health = 80.0
+	actor_vitals = keep_e_vitals
+	parent_dead = keep_e_dead
+	parents_alive = 2
+	event_instances = keep_e_inst
+	event_seq = keep_e_seq
+	facts = keep_e_facts
+	fact_seq = keep_e_facts.size()
+	events_enabled = keep_e_events
+	if pov != keep_e_pov:
+		_switch_pov(keep_e_pov)
+	if kill_ok:
+		oks += 1
+		print("[VERIFY] PASS event_kill_stops_month in_month=", killed_in_month, " money=", money_at_stop)
+	else:
+		fails.append("event_kill_stops_month")
+		print("[VERIFY] FAIL event_kill_stops_month in_month=", killed_in_month, " stopped=", stopped_after_death, " one_event=", reward_not_recorded)
 
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
@@ -5432,6 +5501,8 @@ func _advance_months(n: int) -> void:
 		month += 1
 		# M2-11：已安排的事件按真实月份到期，不依赖当年是否又抽中了新机会
 		_drain_due_events()
+		if ended:
+			return
 		if shop_open:
 			shop["market"] = clampf(float(shop.get("market", 1.0)) + _rndf(-0.045, 0.045), 0.70, 1.40)
 			if _arnd() < 0.10:
@@ -5735,6 +5806,14 @@ func _drain_due_events() -> int:
 				_log_fact("consequence", "event_effect",
 					{"id": str(inst["id"]), "money": d_money, "land": d_land}, ev_fid)
 		fired += 1
+		if ended:
+			# M2-01e：本局已结束，同月后续事件一律不再执行；未执行的留在队列里冻结
+			var left := 0
+			for rest in event_instances:
+				if not bool((rest as Dictionary).get("fired", false)):
+					left += 1
+			_log_fact("game_over", "queue_frozen", {"remaining": left})
+			break
 	var alive_list: Array = []
 	for inst in event_instances:
 		if not bool((inst as Dictionary).get("fired", false)):
@@ -5842,6 +5921,8 @@ func _apply_event_for(who: String, id: String, policy: String) -> String:
 func _apply_event_to_actor(who: String, id: String) -> void:
 	if who == pov:
 		_apply_event(id)
+		# 当前人物的事件效果也要在本次结算里判死，不能等到下个月推进
+		_check_actor_deaths()
 		return
 	_apply_event_to_inactive(who, id)
 
