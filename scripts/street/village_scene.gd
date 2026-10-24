@@ -284,6 +284,7 @@ const YEAR_SCENES := [
 	{"m": 2, "id": "bing", "name": "卧病", "cond": "ill"},
 	{"m": 4, "id": "bai_shi", "name": "拜师", "cond": "apprentice"},
 	{"m": 3, "id": "kai_meng", "name": "开蒙", "cond": "preference"},
+	{"m": 5, "id": "ti_qin", "name": "提亲", "cond": "marriage"},
 ]
 var scenes_done := {}
 
@@ -1148,6 +1149,17 @@ func _replay_snapshot() -> Dictionary:
 		"parent_dead": (parent_dead as Dictionary).duplicate(true),
 		"parent_death_year": (parent_death_year as Dictionary).duplicate(true),
 		"last_settled_year": last_settled_year,
+	"married": married, "spouse_name": spouse_name, "children": children,
+	"milestones": (milestones as Dictionary).duplicate(true),
+	"scenes_done": (scenes_done as Dictionary).duplicate(true),
+	"heirlooms": (heirlooms as Dictionary).duplicate(true),
+	"apprentice_state": apprentice_state, "master_available": master_available,
+	"child_pref": child_pref,
+	"family_ill_pending": family_ill_pending, "ill_who": ill_who,
+	"debt_units": debt_units, "debt_due": debt_due, "debt_state": debt_state,
+	"debt_deferrals": debt_deferrals, "debt_due_sid": debt_due_sid,
+	"workshop_open": workshop_open, "guild_open": guild_open,
+	"apprentice_hired": apprentice_hired, "med_book": med_book, "medicine": medicine,
 		"events": events_enabled,
 		"save_future": save_future,
 		"ended": ended,
@@ -1200,6 +1212,27 @@ func _replay_restore(snap: Dictionary) -> void:
 		marriage_wait_until = int(snap.get("marriage_wait_until", marriage_wait_until))
 	if snap.has("month_frac"):
 		month_frac = float(snap["month_frac"])
+	married = bool(snap.get("married", married))
+	spouse_name = str(snap.get("spouse_name", spouse_name))
+	children = int(snap.get("children", children))
+	milestones = (snap.get("milestones", {}) as Dictionary).duplicate(true)
+	scenes_done = (snap.get("scenes_done", {}) as Dictionary).duplicate(true)
+	heirlooms = (snap.get("heirlooms", {}) as Dictionary).duplicate(true)
+	apprentice_state = str(snap.get("apprentice_state", apprentice_state))
+	master_available = bool(snap.get("master_available", master_available))
+	child_pref = str(snap.get("child_pref", child_pref))
+	family_ill_pending = bool(snap.get("family_ill_pending", family_ill_pending))
+	ill_who = str(snap.get("ill_who", ill_who))
+	debt_units = int(snap.get("debt_units", debt_units))
+	debt_due = int(snap.get("debt_due", debt_due))
+	debt_state = str(snap.get("debt_state", debt_state))
+	debt_deferrals = int(snap.get("debt_deferrals", debt_deferrals))
+	debt_due_sid = int(snap.get("debt_due_sid", debt_due_sid))
+	workshop_open = bool(snap.get("workshop_open", workshop_open))
+	guild_open = bool(snap.get("guild_open", guild_open))
+	apprentice_hired = int(snap.get("apprentice_hired", apprentice_hired))
+	med_book = bool(snap.get("med_book", med_book))
+	medicine = int(snap.get("medicine", medicine))
 	if snap.has("rng"):
 		var r2: Dictionary = snap["rng"]
 		rng_world.state = int(str(r2.get("world", str(rng_world.state))))
@@ -3473,6 +3506,8 @@ func _run_verify_smoke() -> void:
 	npc_state["li_shen"]["last_year"] = 0
 	var refuse_before := npc_log.size()
 	_npc_year_tick()
+	# M3-03：婚配与子女按家境/婚育/健康发生，不再按固定年龄
+	_family_year_tick()
 	var refuse_after := npc_log.size()
 	var refused := false
 	for f in npc_log:

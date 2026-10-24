@@ -10,8 +10,8 @@
     "game_code_modified":  false,
     "remote_mutations_performed":  true,
     "current_task":  "M2-01 事件定义/实例/校验",
-    "next_task":  "M3-03b 修复重放确定性并重新挂载家庭变化",
-    "task_status":  "M3-03a-mechanics-only-auto-disabled",
+    "next_task":  "M3-04 人生档案",
+    "task_status":  "M3-03-family-state-wired",
     "branch":  "agent/m2-m3",
     "base_sha":  "bf0846f1c20cbcf4dd0cf5f5707b0cf1c88e12cb",
     "commit_sha":  "07462f38d7b6b852c9bf6bf13cfc28ed232d1d73",
@@ -24,7 +24,7 @@
                      "docs/verification/M3-02b-route-fix.md",
                      "docs/verification/M3-03a-family-state.md"
                  ],
-    "next_step":  "定位 Linux/本地重放差异，恢复年边界与提亲场景",
+    "next_step":  "死亡后形成可追溯的人生档案，普通生活也有记录",
     "playtest":  {
                      "baseline_sha":  "b50abd09f01a5664822f91d8101126ef4d09e89f",
                      "entry":  "playtest.bat（独立存档 浮生试玩） / play.bat（原存档 浮生）",
