@@ -11,7 +11,7 @@
     "remote_mutations_performed":  true,
     "current_task":  "M1 正确性收敛（阶段一）",
     "next_task":  "M1-04",
-    "task_status":  "phase1-fix1-pushed",
+    "task_status":  "phase1-fix2-pushed",
     "branch":  "16 个 agent/* 堆叠分支（见 docs/DELIVERY_M1.md）",
     "base_sha":  "bf0846f1c20cbcf4dd0cf5f5707b0cf1c88e12cb",
     "commit_sha":  "4466c07634746641983a8522d06997e3b5e61d03",
@@ -24,5 +24,5 @@
                      "docs/BASELINE.md",
                      "docs/tasks/M0-01.md"
                  ],
-    "next_step":  "统一死亡入口（时间推进/行动/对话/事件/战死）"
+    "next_step":  "事件实例绑定承受者；随后恢复规划记录（backlog/PR）"
 }

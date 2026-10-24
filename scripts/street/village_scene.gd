@@ -2119,6 +2119,86 @@ func _run_verify_smoke() -> void:
 	if pov != "child":
 		_switch_pov("child")
 
+	# M2-11：已安排事件按真实月份到期——+1 月、+2 月、跨年、存档恢复、以及抽选失败时仍然到期
+	var keep_seq_e := event_seq
+	var keep_inst_e: Array = (event_instances as Array).duplicate(true)
+	var keep_events_on := events_enabled
+	var keep_m := month
+	var keep_y := year
+	var keep_seq_money := money
+	var keep_due_age := age
+	var keep_due_life := lifespan
+	var keep_due_hp := health
+	var keep_due_ended := ended
+	age = 20
+	lifespan = 70
+	health = 80.0
+	ended = false
+	events_enabled = false  # 关掉新抽选，只验证已排的事件
+	event_instances = []
+	month = 3
+	event_seq = 0
+	_enqueue_event("find_coin", "test", _month_index() + 1)
+	_advance_months(1)
+	var fired_after_one := 1 if event_instances.is_empty() else 0
+	_enqueue_event("find_coin", "test", _month_index() + 2)
+	_advance_months(1)
+	var still_pending := event_instances.size()
+	_advance_months(1)
+	var fired_after_two := 1 if event_instances.is_empty() else 0
+	# 跨年：12 月排到次年 1 月
+	month = 12
+	_enqueue_event("find_coin", "test", _month_index() + 2)
+	_advance_months(2)
+	var fired_cross_year := 1 if event_instances.is_empty() else 0
+	# 存档恢复后仍然到期
+	month = 3
+	_enqueue_event("find_coin", "test", _month_index() + 3)
+	_save_game()
+	event_instances = []
+	_load_game()
+	var restored := event_instances.size()
+	events_enabled = true
+	_advance_months(3)
+	var fired_after_load := 1 if event_instances.is_empty() else 0
+	events_enabled = keep_events_on
+	month = keep_m
+	year = keep_y
+	event_seq = keep_seq_e
+	event_instances = keep_inst_e
+	money = keep_seq_money
+	age = keep_due_age
+	lifespan = keep_due_life
+	health = keep_due_hp
+	ended = keep_due_ended
+	var due_ok: bool = fired_after_one == 1 and still_pending == 1 and fired_after_two == 1 \
+		and fired_cross_year == 1 and restored == 1 and fired_after_load == 1
+	if due_ok:
+		oks += 1
+		print("[VERIFY] PASS event_due_by_month one=", fired_after_one, " pending=", still_pending, " two=", fired_after_two, " cross=", fired_cross_year, " load=", fired_after_load)
+	else:
+		fails.append("event_due_by_month")
+		print("[VERIFY] FAIL event_due_by_month one=", fired_after_one, " pending=", still_pending, " two=", fired_after_two, " cross=", fired_cross_year, " restored=", restored, " load=", fired_after_load)
+
+	# M2-12：同一户人家，三个视角看到的年关费用必须一致
+	var keep_hh_age := age
+	var keep_hh_pov := pov
+	if pov != "child":
+		_switch_pov("child")
+	var hh_child := _household_year_cost()
+	_switch_pov("father")
+	var hh_father := _household_year_cost()
+	_switch_pov("mother")
+	var hh_mother := _household_year_cost()
+	_switch_pov("child")
+	age = keep_hh_age
+	if hh_child == hh_father and hh_father == hh_mother and hh_child > 0:
+		oks += 1
+		print("[VERIFY] PASS household_cost_pov_consistent cost=", hh_child)
+	else:
+		fails.append("household_cost_pov_consistent")
+		print("[VERIFY] FAIL household_cost_pov_consistent ", hh_child, " ", hh_father, " ", hh_mother)
+
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
 	var keep_age := age
@@ -5082,6 +5162,8 @@ func _advance_months(n: int) -> void:
 			_trigger_actor_end()
 			return
 		month += 1
+		# M2-11：已安排的事件按真实月份到期，不依赖当年是否又抽中了新机会
+		_drain_due_events()
 		if shop_open:
 			shop["market"] = clampf(float(shop.get("market", 1.0)) + _rndf(-0.045, 0.045), 0.70, 1.40)
 			if _arnd() < 0.10:
