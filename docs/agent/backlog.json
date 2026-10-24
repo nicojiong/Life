@@ -416,6 +416,32 @@
                                          "NPC会拒绝且行为可解释；同名不同ID不混淆",
                                          "人物死亡/迁移影响相关事件，回忆引用真实事实"
                                      ],
+                      "status":  "todo",
+                      "owner":  null,
+                      "evidence":  [
+
+                                   ],
+                      "commit_sha":  null,
+                      "remote_sha":  null,
+                      "pr_url":  null
+                  },
+                  {
+                      "id":  "M3-01a",
+                      "title":  "事件定义/效果/文案数据化（子任务，不等同于 M3-01 的 NPC 自主生活）",
+                      "depends_on":  [
+                                         "M2-05"
+                                     ],
+                      "priority":  "P1",
+                      "outputs":  [
+                                      "data/events.json 承载定义、效果与文案",
+                                      "DB 加载与 event_def 查询",
+                                      "_apply_event 只保留需按状态计算的分支"
+                                  ],
+                      "acceptance":  [
+                                         "事件定义/效果/文案可在 JSON 中增改而无需改脚本",
+                                         "缺文件时断言 events_missing 报错，不静默通过",
+                                         "需按状态计算的事件（疫/丰年）保留在代码并注明原因"
+                                     ],
                       "status":  "in_progress",
                       "owner":  null,
                       "evidence":  [

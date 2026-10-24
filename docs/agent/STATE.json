@@ -9,20 +9,20 @@
     "godot_run":  "import_only",
     "game_code_modified":  false,
     "remote_mutations_performed":  true,
-    "current_task":  "M1 正确性收敛（阶段一）",
+    "current_task":  "M2-05 / M1 正确性收敛",
     "next_task":  "M1-04",
-    "task_status":  "phase1-fix2-pushed",
+    "task_status":  "phase1-partial",
     "branch":  "16 个 agent/* 堆叠分支（见 docs/DELIVERY_M1.md）",
     "base_sha":  "bf0846f1c20cbcf4dd0cf5f5707b0cf1c88e12cb",
-    "commit_sha":  "4466c07634746641983a8522d06997e3b5e61d03",
-    "remote_sha":  "4466c07634746641983a8522d06997e3b5e61d03",
+    "commit_sha":  "b566a35252a50a240b02000e1e32caff1933fb46",
+    "remote_sha":  "b566a35252a50a240b02000e1e32caff1933fb46",
     "pr_url":  null,
-    "ci_status":  "green (commit 4466c07 checks page; API 限流后改用 HTML 确认)",
+    "ci_status":  "green (commit b566a35 checks page)",
     "integrated_sha":  null,
-    "blocked_reason":  "PR 创建被阻塞：本机无 gh CLI、无 GITHUB_TOKEN；分支已 push 且 CI 通过",
+    "blocked_reason":  "PR 创建仍被阻塞：本机无 gh CLI、无 token；分支已 push、CI 绿",
     "evidence":  [
                      "docs/BASELINE.md",
                      "docs/tasks/M0-01.md"
                  ],
-    "next_step":  "事件实例绑定承受者；随后恢复规划记录（backlog/PR）"
+    "next_step":  "事件实例绑定稳定人物 ID 与死亡后策略；随后连续运行/重载对比与借米因果链"
 }

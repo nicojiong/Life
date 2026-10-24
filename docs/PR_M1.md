@@ -1,4 +1,4 @@
-﻿# PR：M0 收尾 + M1 可靠性底座（汇总）
+# PR：M0 收尾 + M1 可靠性底座（汇总）
 
 > 本文件是 PR 描述草稿。分支 `agent/M1-ci-workflow` 是**一条连续提交链**，已包含此前
 > 16 个开发分支的全部提交，无需逐个合并。
@@ -25,8 +25,8 @@
 
 ## 测试证据
 
-- 本地：`tools/verify.ps1` → `pass=35 fail=0`，exit 0，真实存档目录未被触碰。
-- CI：GitHub Actions run 见 commit 状态页（最新 `35` 条断言）全部步骤 success；此前 `e893052` 的 run `40051930378` 也 success。
+- 本地：`tools/verify.ps1` → `pass=46 fail=0`，exit 0，真实存档目录未被触碰。
+- CI：GitHub Actions run 见 commit 状态页（当前 `46` 条断言）全部步骤 success；此前 `e893052` 的 run `40051930378` 也 success。
 - 日志产物：`verify-artifacts`（run.log）。
 
 历史失败（已在本次修掉）：
@@ -49,3 +49,27 @@
 ## 合并方式
 
 仓库现有授权下由维护者合并。本 PR 只做 push 与验证，不宣称已合并。
+
+## 状态更新（2026-10-24 第三轮）
+
+验证提交：`b566a35`（本轮最后一批修复），CI 状态见该 commit 的 checks 页。
+
+断言从 35 增至 **46**，本轮新增/修复：
+
+| 项 | 断言 |
+|---|---|
+| 旧档三视角迁移不串人 | `old_save_pov_migration` |
+| 赴任路径类型错误 | `take_post_assigns_county` |
+| 死亡入口统一 | `death_unified` |
+| 事件按真实月份到期 | `event_due_by_month` |
+| 年关费用跨视角一致 | `household_cost_pov_consistent` |
+
+**仍未完成**（不得据此标 M0/M1/M2 完成）：
+
+- 事件实例未绑定承受者（切视角会改变个人事件的承受人）—— 下一任务
+- 连续运行与「保存退出后重载续跑」的状态对比未做
+- 借米因果链未做（现有因果链只有 3 跳样例）
+- 数据文件没有字段/类型校验
+- 只有 Linux CI；无真人试玩
+
+唯一下一任务：**事件实例绑定稳定人物 ID，并定义死亡后的取消/转移策略**。
