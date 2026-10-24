@@ -10,8 +10,8 @@
     "game_code_modified":  false,
     "remote_mutations_performed":  true,
     "current_task":  "M2-01 事件定义/实例/校验",
-    "next_task":  "M2-03b 家庭牺牲/珍贵物品链",
-    "task_status":  "M2-03a-debt-done",
+    "next_task":  "M2-03c 拜师/介绍/拒绝链",
+    "task_status":  "M2-03b-family-done",
     "branch":  "agent/m2-m3",
     "base_sha":  "bf0846f1c20cbcf4dd0cf5f5707b0cf1c88e12cb",
     "commit_sha":  "07462f38d7b6b852c9bf6bf13cfc28ed232d1d73",
@@ -21,10 +21,10 @@
     "integrated_sha":  null,
     "blocked_reason":  "仍有限制：只有 Linux CI；数据文件无 schema 校验；无真人试玩。PR 已存在（#1, Draft），不再阻塞。",
     "evidence":  [
-                     "docs/verification/M2-02a-queue.md",
-                     "docs/verification/M2-03a-debt.md"
+                     "docs/verification/M2-03a-debt.md",
+                     "docs/verification/M2-03b-family.md"
                  ],
-    "next_step":  "第二条因果链：家庭牺牲与珍贵物品（接受/拒绝/资源不足/人物失效）",
+    "next_step":  "第三条因果链：拜师与介绍，含拒绝与资源不足",
     "playtest":  {
                      "baseline_sha":  "b50abd09f01a5664822f91d8101126ef4d09e89f",
                      "entry":  "playtest.bat（独立存档 浮生试玩） / play.bat（原存档 浮生）",

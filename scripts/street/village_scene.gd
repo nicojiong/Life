@@ -106,7 +106,7 @@ var month_frac := 0.0
 
 ## 存档格式版本：字段增删时递增，读档据此做迁移
 const ContentSchema := preload("res://scripts/core/content_schema.gd")
-const SAVE_SCHEMA_VERSION := 15
+const SAVE_SCHEMA_VERSION := 16
 var save_schema_seen := 0
 ## 读到更高版本的存档后置位：拒绝加载、拒绝覆盖
 var save_future := false
@@ -281,6 +281,7 @@ const YEAR_SCENES := [
 	{"m": 11, "id": "dongzhi", "name": "冬至"},
 	{"m": 6, "id": "jiemi", "name": "青黄不接", "cond": "poor"},
 {"m": 9, "id": "debt_month", "name": "还米", "cond": "debt"},
+	{"m": 2, "id": "bing", "name": "卧病", "cond": "ill"},
 ]
 var scenes_done := {}
 
@@ -293,6 +294,14 @@ const SCENE_OPTS := {
 		 "text": "你只肯借一斗。孙四笑了笑，说少借点也好。"},
 		{"id": "refuse", "label": "咬牙不借", "gain": {"fame": 1},
 		 "text": "你把裤腰带又紧了一扣，没去敲孙四的门。"},
+	],
+	"bing": [
+		{"id": "sell", "label": "把母亲的银簪当了", "gain": {},
+		 "text": "你拿着银簪去了当铺。掌柜用牙咬了咬，给了四百文。"},
+		{"id": "medicine", "label": "去抓药", "gain": {},
+		 "text": "药方抓了三副，家里熬了半个月的药味。"},
+		{"id": "endure", "label": "硬扛着", "gain": {},
+		 "text": "你夜里听见咳嗽声，装作没醒。"},
 	],
 	"debt_month": [
 		{"id": "repay", "label": "把米还上", "gain": {},
@@ -442,6 +451,8 @@ func _state_dict() -> Dictionary:
 		"women_rank": women_rank, "scenes_done": scenes_done, "child_last": child_last,
 		"time_scale": time_scale, "slot": slot, "month_frac": month_frac,
 	"boundary_log": boundary_log.duplicate(true), "player_build": (player_build as Dictionary).duplicate(true),
+	"heirlooms": (heirlooms as Dictionary).duplicate(true),
+	"family_ill_pending": family_ill_pending, "ill_who": ill_who,
 	"debt_units": debt_units, "debt_due": debt_due, "debt_state": debt_state,
 	"debt_deferrals": debt_deferrals, "debt_due_sid": debt_due_sid,
 		"parent_dead": parent_dead, "parent_death_year": parent_death_year,
@@ -608,6 +619,10 @@ func _load_game() -> bool:
 	month_frac = float(d.get("month_frac", month_frac))
 	if d.get("boundary_log") is Array:
 		boundary_log = d["boundary_log"]
+	if d.get("heirlooms") is Dictionary:
+		heirlooms = d["heirlooms"]
+	family_ill_pending = bool(d.get("family_ill_pending", family_ill_pending))
+	ill_who = str(d.get("ill_who", ill_who))
 	debt_units = int(d.get("debt_units", debt_units))
 	debt_due = int(d.get("debt_due", debt_due))
 	debt_state = str(d.get("debt_state", debt_state))
@@ -1323,6 +1338,8 @@ func _continuity_snapshot() -> Dictionary:
 			"father": father_name, "mother": mother_name},
 		"frac_probe": int(month_frac + 0.58),
 		"debt": {"units": debt_units, "due": debt_due, "state": debt_state, "deferrals": debt_deferrals, "sid": debt_due_sid},
+		"heirlooms": (heirlooms as Dictionary).duplicate(true),
+		"family": {"ill_pending": family_ill_pending, "ill_who": ill_who},
 	}
 
 
@@ -2928,6 +2945,78 @@ func _run_verify_smoke() -> void:
 		print("[VERIFY] FAIL debt_chain borrowed=", borrowed, " queue=", debt_q, " amount=", amount_ok, " insufficient=", insufficient_ok, " repay=", repay_ok, " defer=", defer_ok, " default=", default_ok, " reload=", reload_ok, " defer_res=", defer_res, " first=", first_due, " new=", new_due, " defs=", debt_deferrals, " oldc=", old_cancelled)
 
 
+	# M2-03b：家庭牺牲链——卖嫁妆只能一次、抓药资源不足、硬扛掉血、重载保持
+	var keep_fam_pov := pov
+	var keep_fam_money := money
+	var keep_fam_heir: Dictionary = (heirlooms as Dictionary).duplicate(true)
+	var keep_fam_pending := family_ill_pending
+	var keep_fam_who := ill_who
+	var keep_fam_facts: Array = (facts as Array).duplicate(true)
+	var keep_fam_vitals: Dictionary = (actor_vitals as Dictionary).duplicate(true)
+	var keep_fam_story: Dictionary = (story as Dictionary).duplicate(true)
+	if pov != "child":
+		_switch_pov("child")
+	# 干净起点：父母在世、有银簪、有人卧病
+	ended = false
+	parent_dead["father"] = false
+	parent_dead["mother"] = false
+	parents_alive = 2
+	heirlooms = {HEIRLOOM_HAIRPIN: 1}
+	story.erase("卖了银簪")
+	money = 100
+	facts = []
+	fact_seq = 0
+	actor_vitals["mother"] = {"age": 40, "health": 30.0, "lifespan": 70}
+	family_ill_pending = false
+	ill_who = ""
+	_maybe_start_family_illness()
+	var started: bool = family_ill_pending and ill_who == "mother"
+	# 1) 资源不足：钱 100、药 300 → 失败且状态不变
+	var t_res := _treat_ill()
+	var treat_fail: bool = t_res == "insufficient" and money == 100
+	# 2) 卖嫁妆：只能卖一次
+	var sold1 := _sell_heirloom(HEIRLOOM_HAIRPIN)
+	var money_after_sell := money
+	var sold2 := _sell_heirloom(HEIRLOOM_HAIRPIN)
+	var heirloom_ok: bool = sold1 and not sold2 and money_after_sell == 100 + HEIRLOOM_VALUE and not _has_heirloom(HEIRLOOM_HAIRPIN)
+	# 3) 有钱抓药：扣 300、病人回血
+	money = 400
+	var hp_before := float(_vitals_of("mother")["health"])
+	var treat_ok_res := _treat_ill()
+	var treat_ok: bool = treat_ok_res == "treated" and money == 100 and float(_vitals_of("mother")["health"]) > hp_before
+	# 4) 硬扛：病人掉血，留下印记
+	var hp_before2 := float(_vitals_of("mother")["health"])
+	_endure_illness()
+	var endure_ok: bool = float(_vitals_of("mother")["health"]) < hp_before2 and bool(story.get("硬扛过病", false))
+	# 5) 存读档保持嫁妆与卧病状态
+	heirlooms = {HEIRLOOM_HAIRPIN: 1}
+	family_ill_pending = true
+	ill_who = "father"
+	_save_game()
+	heirlooms = {}
+	family_ill_pending = false
+	ill_who = ""
+	_load_game()
+	var reload_fam_ok: bool = _has_heirloom(HEIRLOOM_HAIRPIN) and family_ill_pending and ill_who == "father"
+	var family_ok: bool = started and treat_fail and heirloom_ok and treat_ok and endure_ok and reload_fam_ok
+	money = keep_fam_money
+	heirlooms = keep_fam_heir
+	family_ill_pending = keep_fam_pending
+	ill_who = keep_fam_who
+	facts = keep_fam_facts
+	fact_seq = keep_fam_facts.size()
+	actor_vitals = keep_fam_vitals
+	story = keep_fam_story
+	if pov != keep_fam_pov:
+		_switch_pov(keep_fam_pov)
+	if family_ok:
+		oks += 1
+		print("[VERIFY] PASS family_sacrifice started=", started, " treat=", treat_ok, " heirloom=", heirloom_ok, " endure=", endure_ok, " reload=", reload_fam_ok)
+	else:
+		fails.append("family_sacrifice")
+		print("[VERIFY] FAIL family_sacrifice started=", started, " treat_fail=", treat_fail, " treat=", treat_ok, " heirloom=", heirloom_ok, " endure=", endure_ok, " reload=", reload_fam_ok)
+
+
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
 	var keep_age := age
@@ -3669,6 +3758,26 @@ func _pick_scene_option(sid: String, oid: String) -> void:
 		var jump0 := _scene_months_to_next()
 		if jump0 > 0:
 			_advance_months(jump0)
+		Sfx.play("ok")
+		_save_game()
+		return
+	if sid == "bing":
+		match oid:
+			"sell":
+				if not _sell_heirloom(HEIRLOOM_HAIRPIN):
+					_toast("匣子早就空了。", Color(0.62, 0.24, 0.18))
+					_log_fact("family", "no_heirloom", {})
+				else:
+					_heal_ill(10.0)
+			"medicine":
+				var t_res := _treat_ill()
+				if t_res == "insufficient":
+					_toast("药铺掌柜摇了摇头，你把手缩了回来。", Color(0.62, 0.24, 0.18))
+			"endure":
+				_endure_illness()
+		family_ill_pending = false
+		ill_who = ""
+		scenes_done["%d_%s" % [year, sid]] = true
 		Sfx.play("ok")
 		_save_game()
 		return
@@ -5998,6 +6107,8 @@ func _on_new_year() -> void:
 		var st_hp := _decay_health(st_age, float(st.get("health", 100.0)))
 		st["health"] = st_hp
 		var st_life := int(st.get("lifespan", 100))
+	# M2-03b：年边界检查是否有人卧病（健康 < 40 的家长）
+	_maybe_start_family_illness()
 	# 家人（含非当前视角的孩子）统一判死；当前视角的死留到 settle 之前按 death_active 处理
 	_kin_death_pass()
 	if ended:
@@ -6380,6 +6491,95 @@ func _debt_unlocks_guarantee() -> bool:
 	return bool(story.get("借米还清", false))
 
 
+## ------------------------------------------------------------------
+## M2-03b 家庭牺牲 / 珍贵物品链
+## 家里有人卧病 → 卖嫁妆 / 抓药 / 硬扛；嫁妆只能卖一次。
+## ------------------------------------------------------------------
+
+const HEIRLOOM_HAIRPIN := "silver_hairpin"
+const HEIRLOOM_VALUE := 400
+const MEDICINE_COST := 300
+
+var heirlooms: Dictionary = {HEIRLOOM_HAIRPIN: 1}
+var family_ill_pending := false
+var ill_who := ""
+
+
+func _has_heirloom(id: String) -> bool:
+	return int(heirlooms.get(id, 0)) > 0
+
+
+func _sell_heirloom(id: String) -> bool:
+	# 卖嫁妆：只能卖一次，卖掉后 story 留痕，母亲关系下降
+	if not _has_heirloom(id):
+		return false
+	heirlooms[id] = int(heirlooms.get(id, 0)) - 1
+	money += HEIRLOOM_VALUE
+	story["卖了银簪"] = true
+	relations["mother"] = int(relations.get("mother", 0)) - 2
+	_log_fact("family", "sold_heirloom", {"id": id, "value": HEIRLOOM_VALUE})
+	_toast("母亲的银簪当了四百文。她把空匣子合上，没说话。", Color(0.62, 0.24, 0.18))
+	return true
+
+
+func _treat_ill() -> String:
+	# 抓药：钱够才起作用
+	if money < MEDICINE_COST:
+		_log_fact("family", "medicine_unaffordable", {"cost": MEDICINE_COST})
+		return "insufficient"
+	money -= MEDICINE_COST
+	_heal_ill(6.0)
+	_log_fact("family", "medicine_bought", {"cost": MEDICINE_COST, "who": ill_who})
+	return "treated"
+
+
+func _endure_illness() -> void:
+	# 硬扛：病人掉健康，家里留下"硬扛过"的印记
+	_heal_ill(-8.0)
+	story["硬扛过病"] = true
+	_log_fact("family", "endured_illness", {"who": ill_who})
+
+
+func _heal_ill(delta: float) -> void:
+	if ill_who == "" or _actor_is_dead(ill_who):
+		return
+	var v: Dictionary = actor_vitals.get(ill_who, {})
+	if v.is_empty():
+		return
+	v["health"] = clampf(float(v.get("health", 60.0)) + delta, 0.0, 100.0)
+	actor_vitals[ill_who] = v
+	_check_actor_deaths()
+
+
+func _pick_ill_parent() -> String:
+	# 选一个在世且最虚弱的家长；都死了就不触发
+	var best := ""
+	var lowest := 1000.0
+	for who in ["father", "mother"]:
+		var id := str(who)
+		if _actor_is_dead(id):
+			continue
+		var hp := float(_vitals_of(id)["health"])
+		if hp < lowest:
+			lowest = hp
+			best = id
+	return best
+
+
+func _maybe_start_family_illness() -> void:
+	# 年边界调用：有家长健康低于 40 且本轮还没触发过，就排一场病
+	if family_ill_pending or ended:
+		return
+	var who := _pick_ill_parent()
+	if who == "":
+		return
+	if float(_vitals_of(who)["health"]) >= 40.0:
+		return
+	ill_who = who
+	family_ill_pending = true
+	_log_fact("family", "illness_started", {"who": who, "health": _vitals_of(who)["health"]})
+
+
 func _scene_ok(s: Dictionary) -> bool:
 	var cond := str(s.get("cond", ""))
 	match cond:
@@ -6387,8 +6587,8 @@ func _scene_ok(s: Dictionary) -> bool:
 			return money < 300
 		"debt":
 			return _has_active_debt()
-		"debt_free":
-			return debt_state == "none"
+		"ill":
+			return family_ill_pending and ill_who != "" and not _actor_is_dead(ill_who)
 	return true
 
 
