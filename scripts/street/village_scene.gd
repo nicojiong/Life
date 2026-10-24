@@ -1319,6 +1319,42 @@ func _continuity_active_fields() -> Dictionary:
 	return row
 
 
+func _slice_run(policy: String, seed_value: int) -> Dictionary:
+	# M2-05：从出生跑到 18 岁，全部走正常接口（节令选择 / 行动 / 月推进）
+	_continuity_start(seed_value, "plain")
+	var choices: Array = []
+	var marks: Dictionary = {}
+	var guard := 0
+	while age < 18 and not ended and guard < 400:
+		guard += 1
+		var sc := _due_scene()
+		if not sc.is_empty():
+			var sid := str(sc["id"])
+			var opts: Array = SCENE_OPTS.get(sid, [])
+			if not opts.is_empty():
+				var oid := str((opts[0] as Dictionary)["id"])
+				if sid == "kai_meng":
+					oid = "study" if policy == "study" else "farm"
+				elif sid == "bai_shi":
+					oid = "pay" if policy == "study" else "decline"
+				elif sid == "bing":
+					oid = "medicine" if policy == "study" else "endure"
+				_pick_scene_option(sid, oid)
+				choices.append({"year": year, "scene": sid, "opt": oid})
+		if _month_index() % 3 == 0:
+			if policy == "study":
+				_on_action({"id": "slice_study", "label": "闭门读书", "months": 1, "gain": {"learning": 2}})
+			else:
+				_on_action({"id": "slice_work", "label": "给人帮工", "months": 1, "gain": {"money": 30}})
+		_advance_months(1)
+		if age == 12 and not marks.has("a12"):
+			marks["a12"] = {"learning": learning, "craft": craft, "money": money, "facts": facts.size()}
+		if age == 18 and not marks.has("a18"):
+			marks["a18"] = {"learning": learning, "craft": craft, "money": money, "facts": facts.size(),
+				"craft_rank": craft_rank, "story": story.duplicate(true)}
+	return {"choices": choices, "marks": marks, "facts": facts.duplicate(true), "story": story.duplicate(true)}
+
+
 func _continuity_snapshot() -> Dictionary:
 	# 从运行中的权威状态导出，不复用存档字段清单
 	var actors := {}
@@ -3191,6 +3227,45 @@ func _run_verify_smoke() -> void:
 	else:
 		fails.append("autonomy_stages")
 		print("[VERIFY] FAIL autonomy_stages infant=", infant_au_ok, " young=", young_au_ok, " minor=", minor_au_ok, " poor=", poor_au_ok, " refuse=", refused_au_ok, " blocked=", blocked_au_ok, " adult=", adult_au_ok, " reload=", reload_au_ok)
+
+
+	# M2-05：0-18 岁闭环与两次可见的跨年差异（同出生、不同选择）
+	var keep_slice05_seed := sim_seed
+	var study_run := _slice_run("study", 4242)
+	var labor_run := _slice_run("labor", 4242)
+	var s12m: Dictionary = study_run["marks"].get("a12", {})
+	var l12m: Dictionary = labor_run["marks"].get("a12", {})
+	var s18m: Dictionary = study_run["marks"].get("a18", {})
+	var l18m: Dictionary = labor_run["marks"].get("a18", {})
+	# 差异一：12 岁的识字量不同
+	var diff_12: bool = float(s12m.get("learning", 0.0)) > float(l12m.get("learning", 0.0))
+	# 差异二：18 岁的积累方向不同（读书的识字高、帮工的钱多）
+	var diff_18: bool = float(s18m.get("learning", 0.0)) > float(l18m.get("learning", 0.0)) \
+		and int(l18m.get("money", 0)) > int(s18m.get("money", 0))
+	# 选择本身被记录，且至少跨两个年份
+	var years: Array = []
+	for c in study_run["choices"]:
+		var y := int((c as Dictionary).get("year", 0))
+		if not years.has(y):
+			years.append(y)
+	var choices_ok: bool = study_run["choices"].size() >= 2 and years.size() >= 2
+	# 两次运行的事实内容不同（不是只改一个数字）
+	var study_fact_ids: Array = []
+	var labor_fact_ids: Array = []
+	for f in study_run["facts"]:
+		study_fact_ids.append(str((f as Dictionary).get("cause", "")))
+	for f in labor_run["facts"]:
+		labor_fact_ids.append(str((f as Dictionary).get("cause", "")))
+	var facts_differ: bool = study_fact_ids != labor_fact_ids
+	var slice_ok05: bool = diff_12 and diff_18 and choices_ok and facts_differ
+	if slice_ok05:
+		oks += 1
+		print("[VERIFY] PASS m2_choice_divergence a12=", s12m.get("learning", 0.0), "/", l12m.get("learning", 0.0), " money18=", s18m.get("money", 0), "/", l18m.get("money", 0), " choices=", study_run["choices"].size())
+	else:
+		fails.append("m2_choice_divergence")
+		print("[VERIFY] FAIL m2_choice_divergence d12=", diff_12, " d18=", diff_18, " choices=", choices_ok, " facts=", facts_differ, " a12=", s12m.get("learning", 0.0), "/", l12m.get("learning", 0.0), " m18=", s18m.get("money", 0), "/", l18m.get("money", 0))
+	# 跑完整段后把世界恢复成干净起点，后面的用例各自有起点
+	_continuity_start(keep_slice05_seed)
 
 
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
