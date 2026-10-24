@@ -806,6 +806,117 @@ func debug_scene_panel() -> void:
 	print("[SCENE] 下个节令=", nxt.get("name", "无"))
 
 
+func _replay_snapshot() -> Dictionary:
+	# M1-05：黄金重放要能回到同一起点，所以先把会被改动的状态整体存下来
+	return {
+		"year": year, "month": month, "age": age, "money": money,
+		"learning": learning, "craft": craft, "fame": fame,
+		"health": health, "lifespan": lifespan,
+		"craft_rank": craft_rank, "trade_rank": trade_rank, "med_rank": med_rank,
+		"farm_rank": farm_rank, "mil_rank": mil_rank, "women_rank": women_rank,
+		"office_rank": office_rank, "gov_merit": gov_merit, "scandal": scandal,
+		"land": land, "merit": merit, "parents_alive": parents_alive,
+		"story": (story as Dictionary).duplicate(true),
+		"relations": (relations as Dictionary).duplicate(true),
+		"cooldown": (action_cooldown as Dictionary).duplicate(true),
+		"facts": (facts as Array).duplicate(true),
+		"pov_state": (pov_state as Dictionary).duplicate(true),
+		"parent_dead": (parent_dead as Dictionary).duplicate(true),
+		"parent_death_year": (parent_death_year as Dictionary).duplicate(true),
+		"last_settled_year": last_settled_year,
+		"events": events_enabled,
+		"save_future": save_future,
+		"ended": ended,
+	}
+
+
+func _replay_restore(snap: Dictionary) -> void:
+	year = int(snap["year"])
+	month = int(snap["month"])
+	age = int(snap["age"])
+	money = int(snap["money"])
+	learning = float(snap["learning"])
+	craft = float(snap["craft"])
+	fame = float(snap["fame"])
+	health = float(snap["health"])
+	lifespan = int(snap["lifespan"])
+	craft_rank = int(snap["craft_rank"])
+	trade_rank = int(snap["trade_rank"])
+	med_rank = int(snap["med_rank"])
+	farm_rank = int(snap["farm_rank"])
+	mil_rank = int(snap["mil_rank"])
+	women_rank = int(snap["women_rank"])
+	office_rank = int(snap["office_rank"])
+	gov_merit = int(snap["gov_merit"])
+	scandal = int(snap["scandal"])
+	land = int(snap["land"])
+	merit = int(snap["merit"])
+	parents_alive = int(snap["parents_alive"])
+	story = (snap["story"] as Dictionary).duplicate(true)
+	relations = (snap["relations"] as Dictionary).duplicate(true)
+	action_cooldown = (snap["cooldown"] as Dictionary).duplicate(true)
+	facts = (snap["facts"] as Array).duplicate(true)
+	pov_state = (snap["pov_state"] as Dictionary).duplicate(true)
+	parent_dead = (snap["parent_dead"] as Dictionary).duplicate(true)
+	parent_death_year = (snap["parent_death_year"] as Dictionary).duplicate(true)
+	last_settled_year = int(snap["last_settled_year"])
+	events_enabled = bool(snap["events"])
+	save_future = bool(snap["save_future"])
+	ended = bool(snap["ended"])
+
+
+func _replay_digest(seed_value: int) -> String:
+	# 固定起点 + 固定命令序列 + 固定种子 → 一份状态摘要
+	_init_sim_rng(seed_value)
+	year = 1046
+	month = 1
+	age = 20
+	money = 1000
+	learning = 20.0
+	craft = 10.0
+	fame = 10.0
+	health = 80.0
+	lifespan = 70
+	craft_rank = 0
+	trade_rank = 0
+	med_rank = 0
+	farm_rank = 0
+	mil_rank = 0
+	women_rank = 0
+	office_rank = 0
+	gov_merit = 0
+	scandal = 0
+	land = 0
+	merit = 0
+	parents_alive = 2
+	story.clear()
+	relations.clear()
+	action_cooldown.clear()
+	facts.clear()
+	last_settled_year = 1045
+	events_enabled = false
+	var study := {"label": "replay_study", "months": 1, "gain": {"learning": 2}}
+	var work := {"label": "replay_work", "months": 1, "gain": {"money": 120}}
+	var long_act := {"label": "replay_long", "months": 12, "gain": {"money": 2000, "health": -2}}
+	_advance_months(1)
+	_on_action(study)
+	_advance_months(1)
+	_on_action(work)
+	_advance_months(1)
+	_on_action(study)
+	_on_action(long_act)
+	# 纳入两条随机流的抽取，种子才会体现在摘要里
+	money += _rndi(0, 500)
+	learning += float(_arndi(0, 5))
+	var parts: Array = [
+		"y%d" % year, "m%d" % month, "a%d" % age, "money%d" % money,
+		"l%.2f" % learning, "c%.2f" % craft, "f%.2f" % fame, "hp%.2f" % health,
+		"rank%d%d%d%d%d%d" % [craft_rank, trade_rank, med_rank, farm_rank, mil_rank, women_rank],
+		"pov%d" % parents_alive, "facts%d" % facts.size(), "story%d" % story.size(),
+	]
+	return "|".join(parts)
+
+
 func _run_verify_smoke() -> void:
 	# 行为断言入口：失败必须以非零退出码结束，供 tools/verify.ps1 判定
 	busy = false
@@ -1322,6 +1433,22 @@ func _run_verify_smoke() -> void:
 	else:
 		fails.append("household_year_cost")
 		print("[VERIFY] FAIL household_year_cost paid=", paid, " expected=", expected_cost)
+
+	# M1-05：黄金重放——同种子同命令必须得到同一份状态摘要
+	var snap5 := _replay_snapshot()
+	var digest_a := _replay_digest(4321)
+	_replay_restore(snap5)
+	var digest_b := _replay_digest(4321)
+	_replay_restore(snap5)
+	var digest_c := _replay_digest(9999)
+	_replay_restore(snap5)
+	_init_sim_rng(4242)
+	if digest_a == digest_b and digest_a != digest_c:
+		oks += 1
+		print("[VERIFY] PASS golden_replay digest=", digest_a)
+	else:
+		fails.append("golden_replay")
+		print("[VERIFY] FAIL golden_replay a=", digest_a, " b=", digest_b, " other_seed=", digest_c)
 
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money

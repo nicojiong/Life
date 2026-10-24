@@ -254,10 +254,11 @@
                                          "关键状态仅由模拟层修改，UI无直接写核心字段通道",
                                          "保存中断长行动后恢复不会重复扣费或发奖"
                                      ],
-                      "status":  "todo",
+                      "status":  "in_progress",
                       "owner":  null,
                       "evidence":  [
-
+                                       "docs/verification/M1-05.md",
+                                       "docs/tasks/M1-05.md"
                                    ],
                       "commit_sha":  null,
                       "remote_sha":  null,

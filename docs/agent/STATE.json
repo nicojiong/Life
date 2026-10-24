@@ -24,5 +24,5 @@
                      "docs/BASELINE.md",
                      "docs/tasks/M0-01.md"
                  ],
-    "next_step":  "M1-05 黄金重放（固定 seed + 命令序列逐 tick 比对）"
+    "next_step":  "M1-01b actor 状态收拢；M1-05 剩余两项"
 }
