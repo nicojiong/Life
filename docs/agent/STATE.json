@@ -9,9 +9,9 @@
     "godot_run":  "import_only",
     "game_code_modified":  false,
     "remote_mutations_performed":  true,
-    "current_task":  "M1-05 跨进程续跑",
-    "next_task":  "M1-05 续跑：其余场景与产物级反向验证",
-    "task_status":  "stage-review-ready",
+    "current_task":  "内部试玩交付",
+    "next_task":  "等待试玩反馈（暂停自动推进）",
+    "task_status":  "paused_for_playtest",
     "branch":  "agent/M1-ci-workflow",
     "base_sha":  "bf0846f1c20cbcf4dd0cf5f5707b0cf1c88e12cb",
     "commit_sha":  "9c86ac7a1c4b024279af05e1792a721a9713082c",
@@ -24,5 +24,5 @@
                      "docs/verification/M1-05d.md",
                      "docs/REVIEW_M1.md"
                  ],
-    "next_step":  "结束 PR Draft 并合并审查；合并后 integrated_sha = 实际 merge SHA"
+    "next_step":  "按反馈修问题；恢复后先做借米因果链"
 }
