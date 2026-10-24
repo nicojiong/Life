@@ -11,18 +11,18 @@
     "remote_mutations_performed":  true,
     "current_task":  "M0-01..M0-04, M1-01a, M1-02a-c, M1-03a-c, M1-04a-d, CI",
     "next_task":  "M1-04",
-    "task_status":  "integration-verified",
+    "task_status":  "M1-03d-pushed",
     "branch":  "16 个 agent/* 堆叠分支（见 docs/DELIVERY_M1.md）",
     "base_sha":  "bf0846f1c20cbcf4dd0cf5f5707b0cf1c88e12cb",
-    "commit_sha":  "",
-    "remote_sha":  "07fbe20d45fa6d8ce4c9ff0914471a74b2a92401",
+    "commit_sha":  "e0a06eb5fff440f643be134ef28d73c933eaf681",
+    "remote_sha":  "e0a06eb5fff440f643be134ef28d73c933eaf681",
     "pr_url":  null,
-    "ci_status":  "green (run 40051930378 @ e893052)",
+    "ci_status":  "green (run 40052529712 @ e0a06eb)",
     "integrated_sha":  null,
     "blocked_reason":  "PR 创建被阻塞：本机无 gh CLI、无 GITHUB_TOKEN；分支已 push 且 CI 通过",
     "evidence":  [
                      "docs/BASELINE.md",
                      "docs/tasks/M0-01.md"
                  ],
-    "next_step":  "M1-05 黄金重放；或先做 M1-01b actor 状态收拢"
+    "next_step":  "M1-05 黄金重放（固定 seed + 命令序列逐 tick 比对）"
 }

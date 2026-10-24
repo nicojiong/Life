@@ -25,8 +25,8 @@
 
 ## 测试证据
 
-- 本地：`tools/verify.ps1` → `pass=26 fail=0`，exit 0，真实存档目录未被触碰。
-- CI：GitHub Actions run **40052074880**（SHA `54e6fcd`）全部步骤 success；此前 `e893052` 的 run `40051930378` 也 success。
+- 本地：`tools/verify.ps1` → `pass=27 fail=0`，exit 0，真实存档目录未被触碰。
+- CI：GitHub Actions run **40052529712**（SHA `e0a06eb`）全部步骤 success；此前 `e893052` 的 run `40051930378` 也 success。
 - 日志产物：`verify-artifacts`（run.log）。
 
 历史失败（已在本次修掉）：
@@ -35,7 +35,7 @@
 ## 已知限制
 
 - 时间边界队列仍未显式化（年关/生日/死亡靠代码先后顺序）。
-- `sim_rng` 仍是单一流，未按出生/世界/人物决策/表现/调试分五类。
+- 随机已拆 birth/world/actor 三条可保存流；表现层与调试流按设计不入库。
 - 黄金重放（固定 seed + 命令序列逐 tick 比对）未开始。
 - 断言是单元级，未覆盖真人试玩的端到端复现。
 - 只有 ubuntu-latest 的 CI；Windows/macOS 未配置。
