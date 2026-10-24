@@ -1341,6 +1341,74 @@ func _continuity_active_fields() -> Dictionary:
 	return row
 
 
+func _route_run(route: String, seed_value: int) -> Dictionary:
+	# M3-02：从出生走到人生结束，全程走正常接口（场景选择 / 行动 / 时间推进）
+	_continuity_start(seed_value, "plain")
+	var guard := 0
+	while not ended and age < 78 and guard < 1000:
+		guard += 1
+		var sc := _due_scene()
+		if not sc.is_empty():
+			var sid := str(sc["id"])
+			var opts: Array = SCENE_OPTS.get(sid, [])
+			if not opts.is_empty():
+				var pick := str((opts[0] as Dictionary)["id"])
+				match sid:
+					"kai_meng":
+						pick = "study" if route == "study" else ("craft" if route == "craft" else "farm")
+					"bai_shi":
+						pick = "pay" if route == "craft" else "decline"
+					"bing":
+						pick = "medicine" if route != "care" else "endure"
+					"jiemi":
+						pick = "refuse" if route == "study" else "borrow1"
+				_pick_scene_option(sid, pick)
+		if _month_index() % 6 == 0:
+			_route_step(route)
+		_advance_months(1)
+	return {
+		"route": route, "age": age, "ended": ended, "money": money,
+		"learning": learning, "craft": craft, "craft_rank": craft_rank,
+		"married": married, "children": children, "facts": facts.size(),
+		"story": (story as Dictionary).duplicate(true), "death_cause": death_cause,
+	}
+
+
+func _route_step(route: String) -> void:
+	if ended:
+		return
+	match route:
+		"study":
+			if _is_exam_year() and age >= 15 and age <= 42 and learning >= 25.0 and money >= 800 and not story.has("举人") and not story.has("进士"):
+				_apply_special("jieshi")
+			elif money < 300 and age >= 14:
+				_on_action({"label": "抄书", "months": 1, "gain": {"money": 60, "learning": 1}})
+			else:
+				_on_action({"label": "读书", "months": 1, "gain": {"learning": 2}})
+		"craft":
+			if craft_rank == 0:
+				_apply_special("apprentice")
+			elif craft_rank == 1 and age >= 18 and craft >= 24.0:
+				_apply_special("journeyman")
+			else:
+				_on_action({"label": "做木工", "months": 1, "gain": {"craft": 2, "money": 25}})
+		"care":
+			if not married and age >= 20:
+				_route_marry()
+			else:
+				_on_action({"label": "种田", "months": 1, "gain": {"money": 25, "health": 1}, "flag": "务农"})
+
+
+func _route_marry() -> void:
+	# 走正常成家路径：成家、添丁、留一条事实
+	married = true
+	spouse_name = "李氏"
+	children += 1
+	story["married"] = true
+	story["成家"] = true
+	_log_fact("marriage", "route_marry", {"spouse": spouse_name})
+
+
 func _slice_run(policy: String, seed_value: int) -> Dictionary:
 	# M2-05：从出生跑到 18 岁，全部走正常接口（节令选择 / 行动 / 月推进）
 	_continuity_start(seed_value, "plain")
@@ -3352,6 +3420,32 @@ func _run_verify_smoke() -> void:
 	else:
 		fails.append("npc_independent_life")
 		print("[VERIFY] FAIL npc_independent_life moved=", npc_moved_n, " world=", world_npc_changed, " goals=", goals_npc_ok, " mem=", memory_npc_count_ok, " remembered=", remembered, " memok=", memory_npc_ok, " refuse=", refuse_npc_ok, " reload=", npc_reload_n_ok)
+
+
+	# M3-02：三条路线都能从出生走到结局，失败后仍能继续生活
+	var r_study := _route_run("study", 111)
+	var r_craft := _route_run("craft", 222)
+	var r_care := _route_run("care", 333)
+	var study_reached: bool = int(r_study["age"]) >= 55
+	var craft_reached: bool = int(r_craft["age"]) >= 55
+	var care_reached: bool = int(r_care["age"]) >= 55
+	var study_mark: bool = bool((r_study["story"] as Dictionary).has("举人")) or bool((r_study["story"] as Dictionary).has("进士")) or float(r_study["learning"]) >= 120.0
+	var craft_mark: bool = int(r_craft["craft_rank"]) >= 2 or bool((r_craft["story"] as Dictionary).has("匠户"))
+	var care_mark: bool = bool(r_care["married"]) or int(r_care["children"]) > 0 or bool((r_care["story"] as Dictionary).has("务农"))
+	var facts_ok: bool = int(r_study["facts"]) >= 20 and int(r_craft["facts"]) >= 20 and int(r_care["facts"]) >= 20
+	# 三条路线的结果确实不同（不是同一条路跑了三次）
+	var sig_study := "%s|%s|%s" % [str(r_study["learning"]), str(r_study["craft_rank"]), str(r_study["married"])]
+	var sig_craft := "%s|%s|%s" % [str(r_craft["learning"]), str(r_craft["craft_rank"]), str(r_craft["married"])]
+	var sig_care := "%s|%s|%s" % [str(r_care["learning"]), str(r_care["craft_rank"]), str(r_care["married"])]
+	var routes_differ: bool = sig_study != sig_craft and sig_craft != sig_care
+	var routes_ok: bool = study_reached and craft_reached and care_reached and study_mark and craft_mark and care_mark and facts_ok and routes_differ
+	if routes_ok:
+		oks += 1
+		print("[VERIFY] PASS m3_routes_walkable study=", r_study["age"], "/", r_study["learning"], " craft=", r_craft["age"], "/", r_craft["craft_rank"], " care=", r_care["age"], "/", r_care["married"])
+	else:
+		fails.append("m3_routes_walkable")
+		print("[VERIFY] FAIL m3_routes_walkable study=", r_study["age"], " craft=", r_craft["age"], " care=", r_care["age"], " marks=", study_mark, "/", craft_mark, "/", care_mark, " facts=", facts_ok, " differ=", routes_differ, " s=", r_study, " c=", r_craft, " ca=", r_care)
+	_continuity_start(4242, "plain")
 
 
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）

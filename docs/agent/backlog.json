@@ -469,10 +469,10 @@
                                          "不读书、改行、晚年补学具有可达路径",
                                          "不同路线至少改变关系网络、机会或生活结构，不只是数值名称"
                                      ],
-                      "status":  "todo",
+                      "status":  "in_progress",
                       "owner":  null,
                       "evidence":  [
-
+                                       "docs/verification/M3-02a-routes.md"
                                    ],
                       "commit_sha":  null,
                       "remote_sha":  null,
