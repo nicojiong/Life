@@ -105,7 +105,7 @@ var women_rank := 0
 var month_frac := 0.0
 
 ## 存档格式版本：字段增删时递增，读档据此做迁移
-const SAVE_SCHEMA_VERSION := 13
+const SAVE_SCHEMA_VERSION := 14
 var save_schema_seen := 0
 ## 读到更高版本的存档后置位：拒绝加载、拒绝覆盖
 var save_future := false
@@ -422,6 +422,7 @@ func _state_dict() -> Dictionary:
 		"father_trade": father_trade, "mother_temper": mother_temper,
 		"women_rank": women_rank, "scenes_done": scenes_done, "child_last": child_last,
 		"time_scale": time_scale, "slot": slot, "month_frac": month_frac,
+	"boundary_log": boundary_log.duplicate(true), "player_build": (player_build as Dictionary).duplicate(true),
 		"parent_dead": parent_dead, "parent_death_year": parent_death_year,
 		"action_cooldown": action_cooldown, "last_settled_year": last_settled_year,
 		"facts": facts, "relations": relations, "actor_vitals": actor_vitals,
@@ -584,6 +585,10 @@ func _load_game() -> bool:
 	child_last = str(d.get("child_last", child_last))
 	time_scale = float(d.get("time_scale", time_scale))
 	month_frac = float(d.get("month_frac", month_frac))
+	if d.get("boundary_log") is Array:
+		boundary_log = d["boundary_log"]
+	if d.get("player_build") is Dictionary:
+		player_build = d["player_build"]
 	if d.get("parent_dead") is Dictionary:
 		var pd: Dictionary = d["parent_dead"]
 		for k in pd.keys():
@@ -1143,8 +1148,8 @@ func _replay_digest(seed_value: int) -> String:
 	return "|".join(parts)
 
 
-func _run_continuity_a(seed_value: String, steps: int, out_path: String) -> void:
-	_continuity_start(int(seed_value))
+func _run_continuity_a(seed_value: String, steps: int, out_path: String, scenario: String = "plain") -> void:
+	_continuity_start(int(seed_value), scenario)
 	_continuity_run(steps)
 	_save_game()
 	_continuity_dump(out_path, _continuity_snapshot())
@@ -1164,14 +1169,14 @@ func _run_continuity_b(steps: int, out0: String, out1: String) -> void:
 	get_tree().quit(0)
 
 
-func _run_continuity_c(seed_value: String, steps: int, steps2: int, out_path: String) -> void:
-	_continuity_start(int(seed_value))
+func _run_continuity_c(seed_value: String, steps: int, steps2: int, out_path: String, scenario: String = "plain") -> void:
+	_continuity_start(int(seed_value), scenario)
 	_continuity_run(steps + steps2)
 	_continuity_dump(out_path, _continuity_snapshot())
 	get_tree().quit(0)
 
 
-func _continuity_start(seed_value: int) -> void:
+func _continuity_start(seed_value: int, scenario: String = "plain") -> void:
 
 	# 固定起点：先定随机种子，再生成身份；清掉所有会跨进程比较的状态
 	ended = false
@@ -1197,6 +1202,28 @@ func _continuity_start(seed_value: int) -> void:
 	month_frac = 0.0
 	if not pov_state.has("child"):
 		pov_state["child"] = _capture_pov()
+	_continuity_scenario(scenario)
+
+
+func _continuity_scenario(scenario: String) -> void:
+	# 各场景都从同一个固定起点出发；这里只做确定性的布置
+	match scenario:
+		"pending":
+			# 父亲视角，带两条未到期事件（一条排给父亲，一条排给母亲）
+			_switch_pov("father")
+			_enqueue_event("drought", "pending_a", _month_index() + 8, 0, "father", "cancel")
+			_enqueue_event("plague", "pending_b", _month_index() + 9, 0, "mother", "transfer")
+		"death":
+			# 父亲视角，孩子只剩 1 点健康，致死事件排在次月，奖励排在同月之后
+			_switch_pov("father")
+			actor_vitals["child"] = {"age": 10, "health": 1.0, "lifespan": 60}
+			_enqueue_event("drought", "death_hit", _month_index() + 4, 0, "child", "cancel")
+			_enqueue_event("reward", "death_after", _month_index() + 4, 0, "mother", "cancel")
+		"frac":
+			# 非零月内进度：保存点落在月中间
+			month_frac = 0.42
+		_:
+			pass
 
 
 func _continuity_run(steps: int) -> void:
@@ -1216,6 +1243,16 @@ func _continuity_run(steps: int) -> void:
 		_advance_months(1)
 
 
+func _continuity_active_fields() -> Dictionary:
+	# 只读：从正在使用的真实字段读取当前人物；不切视角、不写回缓存
+	var row := {"age": age, "health": health, "lifespan": lifespan}
+	for f in POV_FIELDS:
+		row[str(f)] = get(str(f))
+	row["story"] = (story as Dictionary).duplicate(true)
+	row["build"] = (player_build as Dictionary).duplicate(true)
+	return row
+
+
 func _continuity_snapshot() -> Dictionary:
 	# 从运行中的权威状态导出，不复用存档字段清单
 	var actors := {}
@@ -1233,7 +1270,7 @@ func _continuity_snapshot() -> Dictionary:
 		"pov": pov,
 		"year": year, "month": month, "month_frac": month_frac, "time_scale": time_scale,
 		"money": money,
-		"active": {"age": age, "health": health, "lifespan": lifespan, "learning": learning, "fame": fame},
+		"active": _continuity_active_fields(),
 		"actors": actors,
 		"household": {"parents_alive": parents_alive, "married": married, "children": children, "land": land},
 		"relations": (relations as Dictionary).duplicate(true),
@@ -1247,6 +1284,18 @@ func _continuity_snapshot() -> Dictionary:
 		"parent_death_year": (parent_death_year as Dictionary).duplicate(true),
 		"rng": {"world": str(rng_world.state), "actor": str(rng_actor.state), "birth": str(rng_birth.state)},
 		"scenes_done": (scenes_done as Dictionary).duplicate(true),
+		"opp_last": (opp_last as Dictionary).duplicate(true),
+		"watermarks": {
+			"last_event_fid": last_event_fid, "last_boundary_fid": last_boundary_fid,
+			"boundary_log": boundary_log.duplicate(true),
+		},
+		"milestones": (milestones as Dictionary).duplicate(true),
+		"child_last": child_last,
+		"shop": {"open": shop_open, "label": shop_label, "level": shop_level,
+			"data": (shop as Dictionary).duplicate(true)},
+		"identity": {"name": name_text, "place": place, "birth_year": birth_year,
+			"father": father_name, "mother": mother_name},
+		"frac_probe": int(month_frac + 0.58),
 	}
 
 

@@ -11,7 +11,7 @@
     "remote_mutations_performed":  true,
     "current_task":  "M1-05 跨进程续跑",
     "next_task":  "M1-05 续跑：其余场景与产物级反向验证",
-    "task_status":  "M1-05c-first-scenario-green",
+    "task_status":  "M1-05d-four-scenarios-green",
     "branch":  "agent/M1-ci-workflow",
     "base_sha":  "bf0846f1c20cbcf4dd0cf5f5707b0cf1c88e12cb",
     "commit_sha":  "dd9e9fd7efe280a0c2d33da395d74423a7396584",
@@ -21,8 +21,8 @@
     "integrated_sha":  null,
     "blocked_reason":  "仍有限制：只有 Linux CI；数据文件无 schema 校验；无真人试玩。PR 已存在（#1, Draft），不再阻塞。",
     "evidence":  [
-                     "docs/verification/M2-01e.md",
-                     "docs/verification/M1-05c.md"
+                     "docs/verification/M1-05c.md",
+                     "docs/verification/M1-05d.md"
                  ],
-    "next_step":  "续跑其余场景：父母待办、死亡边界、非零 month_frac、产物级反向验证"
+    "next_step":  "阶段集成评审；随后借米因果链"
 }

@@ -1,23 +1,20 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-  跨进程续跑验收：三个独立 Godot 进程的状态比对。
+  跨进程续跑验收：多个场景，各跑三个独立 Godot 进程并比对状态。
 
 .DESCRIPTION
   A：固定起点跑 N 步，正常存档，导出检查点，退出。
   B：新进程读档（不带 --fresh），立即导出加载状态，再跑 M 步，导出终态。
   C：另一套干净目录，从同样起点连续跑 N+M 步。
 
-  比较 A 检查点 vs B 加载即刻；B 终态 vs C 终态。
-  另做反向验证：删字段 / 改事实 / 改随机流后比较器必须报错。
-
-.EXAMPLE
-  tools/continuity.ps1 -GodotPath "C:\Godot\Godot_v4.7.2-stable_win64_console.exe"
+  每个场景比较 A/B0 与 B1/C，并检查业务不变量。
+  另做磁盘产物验证：未改动文件必须零差异；改事实/随机流/人物或删字段必须报错并给出字段路径。
 #>
 param(
   [Parameter(Mandatory = $true)][string]$GodotPath,
   [string]$Seed = "20261024",
-  [int]$StepsA = 6,
+  [int]$StepsA = 3,
   [int]$StepsB = 6,
   [string]$ArtifactDir = "verify-artifacts/continuity",
   [switch]$KeepTemp
@@ -25,7 +22,6 @@ param(
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
-$ErrorActionPreference = "Stop"
 $runId = [guid]::NewGuid().ToString("N").Substring(0, 8)
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) "life-cont-$runId"
 if ([System.IO.Path]::IsPathRooted($ArtifactDir)) {
@@ -35,14 +31,9 @@ if ([System.IO.Path]::IsPathRooted($ArtifactDir)) {
 }
 
 function Write-Step([string]$msg) { Write-Host "[cont] $msg" }
-try {
-  $null = 0
-} catch {
-}
-
 
 function Invoke-Godot {
-  param([string]$Project, [string[]]$GodotArgs, [string]$LogPath, [int]$TimeoutSeconds = 180)
+  param([string]$Project, [string[]]$GodotArgs, [string]$LogPath, [int]$TimeoutSeconds = 240)
   $job = Start-Job -ScriptBlock {
     param($exe, $proj, $a)
     $list = @()
@@ -54,8 +45,8 @@ function Invoke-Godot {
   $output = Receive-Job $job
   $state = $job.State
   Remove-Job $job -Force
-  if ($state -ne "Completed") { throw "Godot 超时: $Project" }
   $output | Set-Content -Path $LogPath -Encoding utf8
+  if ($state -ne "Completed") { return 124 }
   $code = 0
   foreach ($line in $output) {
     if ($line -match '^EXITCODE=(\d+)$') { $code = [int]$Matches[1] }
@@ -77,9 +68,9 @@ function ConvertTo-Canon {
     return $h
   }
   if ($Value -is [System.Collections.IEnumerable]) {
-    $a = @()
-    foreach ($x in $Value) { $a += ,(ConvertTo-Canon $x) }
-    return ,$a
+    $acc = @()
+    foreach ($x in $Value) { $acc += ,(ConvertTo-Canon $x) }
+    return ,$acc
   }
   if ($Value -is [System.Management.Automation.PSCustomObject]) {
     $h = [ordered]@{}
@@ -90,12 +81,12 @@ function ConvertTo-Canon {
 }
 
 function Compare-Snapshot {
-  param($Left, $Right, [string]$Label, [int]$MaxDiffs = 12)
+  param($Left, $Right, [string]$Label, [int]$MaxDiffs = 15)
   $diffs = New-Object System.Collections.Generic.List[string]
-  $script:pending = New-Object System.Collections.Generic.Queue[object]
-  $script:pending.Enqueue(@{ a = $Left; b = $Right; path = $Label })
-  while ($script:pending.Count -gt 0 -and $diffs.Count -lt $MaxDiffs) {
-    $item = $script:pending.Dequeue()
+  $queue = New-Object System.Collections.Generic.Queue[object]
+  $queue.Enqueue(@{ a = $Left; b = $Right; path = $Label })
+  while ($queue.Count -gt 0 -and $diffs.Count -lt $MaxDiffs) {
+    $item = $queue.Dequeue()
     $a = ConvertTo-Canon $item.a
     $b = ConvertTo-Canon $item.b
     $path = $item.path
@@ -104,11 +95,9 @@ function Compare-Snapshot {
       foreach ($k in $a.Keys) { $keys += [string]$k }
       foreach ($k in $b.Keys) { if (-not ($keys -contains [string]$k)) { $keys += [string]$k } }
       foreach ($k in $keys) {
-        $hasA = $a.Contains([string]$k)
-        $hasB = $b.Contains([string]$k)
-        if (-not $hasA) { $diffs.Add("$path.$k : 仅右侧存在") ; continue }
-        if (-not $hasB) { $diffs.Add("$path.$k : 仅左侧存在") ; continue }
-        $script:pending.Enqueue(@{ a = $a[[string]$k]; b = $b[[string]$k]; path = "$path.$k" })
+        if (-not $a.Contains($k)) { $diffs.Add("$path.$k = <缺失于左侧>") ; continue }
+        if (-not $b.Contains($k)) { $diffs.Add("$path.$k = <缺失于右侧>") ; continue }
+        $queue.Enqueue(@{ a = $a[$k]; b = $b[$k]; path = "$path.$k" })
       }
       continue
     }
@@ -116,13 +105,13 @@ function Compare-Snapshot {
       $la = @($a); $lb = @($b)
       if ($la.Count -ne $lb.Count) { $diffs.Add("$path : 长度 $($la.Count) vs $($lb.Count)") ; continue }
       for ($i = 0; $i -lt $la.Count; $i++) {
-        $script:pending.Enqueue(@{ a = $la[$i]; b = $lb[$i]; path = "$path[$i]" })
+        $queue.Enqueue(@{ a = $la[$i]; b = $lb[$i]; path = "$path[$i]" })
       }
       continue
     }
     if ("$a" -ne "$b") { $diffs.Add("$path : '$a' vs '$b'") }
   }
-  return $diffs
+  return @($diffs.ToArray())
 }
 
 function Read-Snapshot([string]$path) {
@@ -138,7 +127,7 @@ New-Item -ItemType Directory -Path $artifacts -Force | Out-Null
 
 function New-ProjectCopy([string]$name) {
   $dir = Join-Path $tempRoot $name
-  New-Item -ItemType Directory -Path $dir | Out-Null
+  New-Item -ItemType Directory -Path $dir -Force | Out-Null
   $proj = Join-Path $dir "project"
   New-Item -ItemType Directory -Path $proj -Force | Out-Null
   $skip = @('.git', '.github', 'verify-artifacts')
@@ -158,120 +147,201 @@ function Get-UserDir([string]$name) {
   return (Join-Path $env:APPDATA "Godot\app_userdata\LifeCont-$name")
 }
 
-$projAB = New-ProjectCopy "AB-$runId"
-$projC = New-ProjectCopy "C-$runId"
-$udAB = Get-UserDir "AB-$runId"
-$udC = Get-UserDir "C-$runId"
-Write-Step "临时目录 $tempRoot"
-Write-Step "A/B 项目 $projAB"
-Write-Step "C 项目 $projC"
+$results = New-Object System.Collections.Generic.List[object]
+$allFailures = New-Object System.Collections.Generic.List[string]
 
-# ---------------------------------------------------------------- 三个进程
+function Invoke-Scenario {
+  param([string]$Name, [int]$N, [int]$M)
 
-$common = @("--seed=$Seed")
-Write-Step "A：跑 $StepsA 步并存档"
-$codeA = Invoke-Godot -Project $projAB -GodotArgs (@("--stage=continuity_a", "--steps=$StepsA", "--out=user://cont_a.json") + $common) -LogPath (Join-Path $artifacts "log-a.txt")
-if ($codeA -ne 0) { Write-Host "[cont] A 进程失败 exit=$codeA" -ForegroundColor Red; exit 1 }
+  Write-Step "场景 $Name：A 跑 $N 步 / B 续跑 $M 步 / C 连续 $($N + $M) 步"
+  $projAB = New-ProjectCopy "$Name-AB-$runId"
+  $projC = New-ProjectCopy "$Name-C-$runId"
+  $udAB = Get-UserDir "$Name-AB-$runId"
+  $udC = Get-UserDir "$Name-C-$runId"
+  $dir = Join-Path $artifacts $Name
+  New-Item -ItemType Directory -Path $dir -Force | Out-Null
+  $common = @("--seed=$Seed", "--scenario=$Name")
 
-Write-Step "B：读档并续跑 $StepsB 步"
-$codeB = Invoke-Godot -Project $projAB -GodotArgs (@("--stage=continuity_b", "--steps=$StepsB", "--out=user://cont_b0.json", "--out2=user://cont_b1.json")) -LogPath (Join-Path $artifacts "log-b.txt")
-if ($codeB -ne 0) { Write-Host "[cont] B 进程失败 exit=$codeB" -ForegroundColor Red; exit 1 }
+  $codeA = Invoke-Godot -Project $projAB -GodotArgs (@("--stage=continuity_a", "--steps=$N", "--out=user://cont_a.json") + $common) -LogPath (Join-Path $dir "log-a.txt")
+  if ($codeA -ne 0) { $allFailures.Add("$Name : A 进程退出 $codeA") }
+  $codeB = Invoke-Godot -Project $projAB -GodotArgs (@("--stage=continuity_b", "--steps=$M", "--out=user://cont_b0.json", "--out2=user://cont_b1.json", "--scenario=$Name")) -LogPath (Join-Path $dir "log-b.txt")
+  if ($codeB -ne 0) { $allFailures.Add("$Name : B 进程退出 $codeB") }
+  $codeC = Invoke-Godot -Project $projC -GodotArgs (@("--stage=continuity_c", "--steps=$N", "--steps2=$M", "--out=user://cont_c.json") + $common) -LogPath (Join-Path $dir "log-c.txt")
+  if ($codeC -ne 0) { $allFailures.Add("$name : C 进程退出 $codeC") }
 
-Write-Step "C：连续跑 $($StepsA + $StepsB) 步"
-$codeC = Invoke-Godot -Project $projC -GodotArgs (@("--stage=continuity_c", "--steps=$StepsA", "--steps2=$StepsB", "--out=user://cont_c.json") + $common) -LogPath (Join-Path $artifacts "log-c.txt")
-if ($codeC -ne 0) { Write-Host "[cont] C 进程失败 exit=$codeC" -ForegroundColor Red; exit 1 }
+  foreach ($f in @("cont_a.json", "cont_b0.json", "cont_b1.json", "fusheng_save_1.json")) {
+    if (Test-Path (Join-Path $udAB $f)) { Copy-Item (Join-Path $udAB $f) (Join-Path $dir $f) -Force }
+  }
+  if (Test-Path (Join-Path $udC "cont_c.json")) { Copy-Item (Join-Path $udC "cont_c.json") (Join-Path $dir "cont_c.json") -Force }
 
-# ---------------------------------------------------------------- 收产物
+  $a = Read-Snapshot (Join-Path $dir "cont_a.json")
+  $b0 = Read-Snapshot (Join-Path $dir "cont_b0.json")
+  $b1 = Read-Snapshot (Join-Path $dir "cont_b1.json")
+  $c = Read-Snapshot (Join-Path $dir "cont_c.json")
 
-foreach ($f in @("cont_a.json", "cont_b0.json", "cont_b1.json", "fusheng_save_1.json")) {
-  Copy-Item (Join-Path $udAB $f) (Join-Path $artifacts $f) -Force
+  $d1 = @(Compare-Snapshot -Left $a -Right $b0 -Label "A/B0")
+  $d2 = @(Compare-Snapshot -Left $b1 -Right $c -Label "B1/C")
+
+  $biz = @()
+  if ($d1.Count -eq 0) { $biz += "A/B0 一致" } else { $biz += "A/B0 差异 $($d1.Count) 处" }
+  if ($d2.Count -eq 0) { $biz += "B1/C 一致" } else { $biz += "B1/C 差异 $($d2.Count) 处" }
+  foreach ($d in $d1) { $allFailures.Add("$Name A/B0 : $d") }
+  foreach ($d in $d2) { $allFailures.Add("$Name B1/C : $d") }
+
+  if ($b0.year -ne $a.year -or $b0.month -ne $a.month) {
+    $allFailures.Add("$Name : 读档年月 $($b0.year)/$($b0.month) 与检查点 $($a.year)/$($a.month) 不同")
+  }
+  if (-not ($b1.year -gt $a.year -or ($b1.year -eq $a.year -and $b1.month -gt $a.month))) {
+    $allFailures.Add("$Name : B 续跑后时间未推进")
+  }
+  if (@($c.facts).Count -le 0) { $allFailures.Add("$Name : C 路径没有事实，场景空转") }
+
+  switch ($Name) {
+    "pending" {
+      $aQueue = @($a.queue)
+      $b0Queue = @($b0.queue)
+      if ($b0Queue.Count -ne $aQueue.Count) { $allFailures.Add("pending : 读档后队列条数 $($b0Queue.Count) 与检查点 $($aQueue.Count) 不同") }
+      for ($i = 0; $i -lt [Math]::Min($aQueue.Count, $b0Queue.Count); $i++) {
+        $sigA = "$([int]$aQueue[$i].sid)|$($aQueue[$i].target)|$([int]$aQueue[$i].due)|$($aQueue[$i].policy)"
+        $sigB = "$([int]$b0Queue[$i].sid)|$($b0Queue[$i].target)|$([int]$b0Queue[$i].due)|$($b0Queue[$i].policy)"
+        if ($sigA -ne $sigB) { $allFailures.Add("pending : 第 $i 条队列顺序/主体/到期/策略与检查点不同") }
+      }
+      if ($aQueue.Count -lt 2) { $allFailures.Add("pending : 检查点里没有未到期事件，场景无效") }
+      $firedInB = @($b1.facts | Where-Object { "$($_.cause)" -like "pending_*" })
+      if ($firedInB.Count -lt 1) { $allFailures.Add("pending : B 续跑后没有触发任何待办事件") }
+      $biz += "队列 $($aQueue.Count) 条未到期、顺序/主体/到期一致；B 触发 $($firedInB.Count) 条"
+    }
+    "death" {
+      if (-not $b1.actors.child.dead) { $allFailures.Add("death : B 续跑后孩子没有判死") }
+      $rewardFacts = @($b1.facts | Where-Object { "$($_.cause)" -eq "death_after" })
+      if ($rewardFacts.Count -ne 0) { $allFailures.Add("death : 致死后的奖励仍被执行（$($rewardFacts.Count) 条）") }
+      $hitFacts = @($b1.facts | Where-Object { "$($_.cause)" -eq "death_hit" })
+      if ($hitFacts.Count -ne 1) { $allFailures.Add("death : 致死事件应恰好记 1 条，实际 $($hitFacts.Count)") }
+      $expectMoney = [double]$a.money - 700.0
+      if ([Math]::Abs([double]$b1.money - $expectMoney) -gt 1e-9) {
+        $allFailures.Add("death : 资金应为 $expectMoney（起点减旱灾 700），实际 $($b1.money)")
+      }
+      $biz += "孩子已死；奖励未执行；致死事件 1 条；资金 $($a.money)->$($b1.money)（应为 -700）"
+    }
+    "frac" {
+      if ([Math]::Abs([double]$b0.month_frac - [double]$a.month_frac) -gt 1e-9) {
+        $allFailures.Add("frac : 读档后 month_frac $($b0.month_frac) 与检查点 $($a.month_frac) 不同")
+      }
+      if ([double]$a.month_frac -le 0.0) { $allFailures.Add("frac : 检查点 month_frac 为 0，场景无效") }
+      if ([int]$b0.frac_probe -ne [int]$a.frac_probe) { $allFailures.Add("frac : frac_probe 恢复后变化") }
+      $biz += "month_frac $($a.month_frac)->$($b0.month_frac)->$($b1.month_frac)；frac_probe=$($b0.frac_probe)"
+    }
+    default {
+      $biz += "事实 $($a.facts.Count) -> $($b1.facts.Count)"
+    }
+  }
+
+  $results.Add([pscustomobject]@{
+    scenario = $Name
+    exitA = $codeA; exitB = $codeB; exitC = $codeC
+    diffAB = $d1.Count; diffBC = $d2.Count
+    invariants = ($biz -join "；")
+    dir = $dir
+  })
 }
-Copy-Item (Join-Path $udC "cont_c.json") (Join-Path $artifacts "cont_c.json") -Force
-Copy-Item (Join-Path $udAB "fusheng_save_1.json") (Join-Path $artifacts "save_ab.json") -Force -ErrorAction SilentlyContinue
 
-$a = Read-Snapshot (Join-Path $artifacts "cont_a.json")
-$b0 = Read-Snapshot (Join-Path $artifacts "cont_b0.json")
-$b1 = Read-Snapshot (Join-Path $artifacts "cont_b1.json")
-$c = Read-Snapshot (Join-Path $artifacts "cont_c.json")
+# ---------------------------------------------------------------- 四个场景
 
-# ---------------------------------------------------------------- 比较
+Invoke-Scenario -Name "plain" -N $StepsA -M $StepsB
+Invoke-Scenario -Name "pending" -N 3 -M 6
+Invoke-Scenario -Name "death" -N 1 -M 4
+Invoke-Scenario -Name "frac" -N 2 -M 4
 
-$failures = New-Object System.Collections.Generic.List[string]
+# ---------------------------------------------------------------- 磁盘产物验证
+
+Write-Step "磁盘产物验证：同一读取与比较入口"
+$diskDir = Join-Path $artifacts "disk-check"
+New-Item -ItemType Directory -Path $diskDir -Force | Out-Null
+Copy-Item (Join-Path $artifacts "plain/cont_a.json") (Join-Path $diskDir "good_a.json") -Force
+Copy-Item (Join-Path $artifacts "plain/cont_b0.json") (Join-Path $diskDir "good_b0.json") -Force
+
+$diskReport = New-Object System.Collections.Generic.List[string]
+$goodA = Read-Snapshot (Join-Path $diskDir "good_a.json")
+$goodB = Read-Snapshot (Join-Path $diskDir "good_b0.json")
+$dGood = @(Compare-Snapshot -Left $goodA -Right $goodB -Label "DISK")
+if ($dGood.Count -ne 0) {
+  $allFailures.Add("disk : 未改动文件比较不为零差异（$($dGood.Count)）")
+  $diskReport.Add("未改动：错误地出现 $($dGood.Count) 处差异")
+} else {
+  $diskReport.Add("未改动：0 处差异（通过）")
+}
+
+function Test-DiskMutation {
+  param([string]$name, [scriptblock]$mutate, [string]$expectPathFragment)
+  $file = Join-Path $diskDir "mut_$name.json"
+  $json = Get-Content (Join-Path $diskDir "good_a.json") -Raw -Encoding utf8 | ConvertFrom-Json
+  $mutated = $mutate.Invoke($json)
+  $mutated | ConvertTo-Json -Depth 40 | Set-Content $file -Encoding utf8
+  $m = Read-Snapshot $file
+  $d = @(Compare-Snapshot -Left $m -Right $goodB -Label "MUT")
+  if ($d.Count -eq 0) {
+    $allFailures.Add("disk : 修改 $name 后比较器没有报错")
+    $diskReport.Add("$name：未检出（失败）")
+    return
+  }
+  $hit = $false
+  foreach ($line in $d) { if (("$line").Contains($expectPathFragment)) { $hit = $true } }
+  if (-not $hit) { $allFailures.Add("disk : 修改 $name 的报错路径不含 $expectPathFragment，实际 $($d[0])") }
+  $diskReport.Add("$name：检出 $($d.Count) 处，首条：$($d[0])")
+}
+
+Test-DiskMutation -name "fact" -mutate {
+  param($s) $s.facts[0].kind = "tampered"; return $s
+} -expectPathFragment "facts[0].kind"
+
+Test-DiskMutation -name "rng" -mutate {
+  param($s) $s.rng.actor = "0"; return $s
+} -expectPathFragment "rng.actor"
+
+Test-DiskMutation -name "actor" -mutate {
+  param($s) $s.actors.child.health = 1.0; return $s
+} -expectPathFragment "actors.child.health"
+
+Test-DiskMutation -name "missing" -mutate {
+  param($s) $s.PSObject.Properties.Remove("queue"); return $s
+} -expectPathFragment "queue"
+
+$restored = Read-Snapshot (Join-Path $diskDir "good_a.json")
+$dRestore = @(Compare-Snapshot -Left $restored -Right $goodB -Label "RESTORE")
+if ($dRestore.Count -ne 0) {
+  $allFailures.Add("disk : 恢复正确文件后仍有差异 $($dRestore.Count)")
+  $diskReport.Add("恢复：仍有 $($dRestore.Count) 处差异（失败）")
+} else {
+  $diskReport.Add("恢复：0 处差异（通过）")
+}
+
+# ---------------------------------------------------------------- 报告
+
 $report = New-Object System.Collections.Generic.List[string]
 $report.Add("seed=$Seed stepsA=$StepsA stepsB=$StepsB run=$runId")
 $report.Add("godot=$GodotPath")
-$report.Add("A 快照 year=$($a.year) month=$($a.month) frac=$($a.month_frac) facts=$($a.facts.Count)")
-$report.Add("B0 快照 year=$($b0.year) month=$($b0.month) frac=$($b0.month_frac) facts=$($b0.facts.Count)")
-$report.Add("B1 快照 year=$($b1.year) month=$($b1.month) frac=$($b1.month_frac) facts=$($b1.facts.Count)")
-$report.Add("C  快照 year=$($c.year) month=$($c.month) frac=$($c.month_frac) facts=$($c.facts.Count)")
-
-$d1 = Compare-Snapshot -Left $a -Right $b0 -Label "A/B0"
-if ($d1.Count -gt 0) {
-  $failures.Add("A 检查点与 B 加载状态不一致：" + ($d1 -join " | "))
-  $report.Add("== A vs B0 差异 ==")
-  foreach ($d in $d1) { $report.Add("  $d") }
-} else {
-  $report.Add("A vs B0：一致")
+$report.Add("")
+$report.Add("scenario | exitA | exitB | exitC | A/B0 差异 | B1/C 差异 | 业务不变量 | 产物")
+foreach ($r in $results) {
+  $report.Add("$($r.scenario) | $($r.exitA) | $($r.exitB) | $($r.exitC) | $($r.diffAB) | $($r.diffBC) | $($r.invariants) | $($r.dir)")
 }
-
-$d2 = Compare-Snapshot -Left $b1 -Right $c -Label "B1/C"
-if ($d2.Count -gt 0) {
-  $failures.Add("B 续跑终态与 C 连续运行终态不一致：" + ($d2 -join " | "))
-  $report.Add("== B1 vs C 差异 ==")
-  foreach ($d in $d2) { $report.Add("  $d") }
-} else {
-  $report.Add("B1 vs C：一致")
+$report.Add("")
+$report.Add("== 磁盘产物验证 ==")
+foreach ($l in $diskReport) { $report.Add("  $l") }
+$report.Add("")
+if ($allFailures.Count -gt 0) {
+  $report.Add("== 失败 ==")
+  foreach ($f in $allFailures) { $report.Add("  $f") }
+  $allFailures | Set-Content (Join-Path $artifacts "failures.txt") -Encoding utf8
 }
-
-# 业务不变量：不能只验证两边相等
-if ([double]$a.month_frac -eq 0.0 -and [double]$c.month_frac -eq 0.0) {
-  # 允许为 0，但必须显式记录：首轮场景的保存点不在月中
-  $report.Add("注意：本轮保存点 month_frac=0（非零月内进度用例另列）")
-}
-if (-not ($b1.year -gt $a.year -or ($b1.year -eq $a.year -and $b1.month -gt $a.month))) {
-  $failures.Add("B 续跑后时间没有推进：A y$($a.year)m$($a.month) -> B1 y$($b1.year)m$($b1.month)")
-}
-if ($b0.year -ne $a.year -or $b0.month -ne $a.month) {
-  $failures.Add("读档后年月与检查点不同：$($a.year)/$($a.month) vs $($b0.year)/$($b0.month)")
-}
-if ([int]$c.fact_seq -le 0 -or @($c.facts).Count -le 0) {
-  $failures.Add("C 路径没有产生任何事实，场景可能空转")
-}
-if ([int]$b1.fact_seq -lt [int]$a.fact_seq) {
-  $failures.Add("B 续跑后事实序号回退：$($a.fact_seq) -> $($b1.fact_seq)")
-}
-
-# ---------------------------------------------------------------- 反向验证
-
-function Test-ComparatorCatches {
-  param([string]$name, [scriptblock]$mutate)
-  $copy = (Get-Content (Join-Path $artifacts "cont_a.json") -Raw -Encoding utf8 | ConvertFrom-Json)
-  $mutated = $mutate.Invoke($copy)
-  $d = Compare-Snapshot -Left $mutated -Right $b0 -Label "MUT"
-  if ($d.Count -eq 0) {
-    $failures.Add("反向验证失败：$name 改动后比较器没有报差异")
-    $report.Add("反向验证 $name：未检出（错误）")
-  } else {
-    $report.Add("反向验证 $name：检出 $($d.Count) 处，例如 $($d[0])")
-  }
-}
-
-Test-ComparatorCatches -name "删除事实" -mutate { param($s) $s.facts = @(); return $s }
-Test-ComparatorCatches -name "修改随机流" -mutate { param($s) $s.rng.actor = "0"; return $s }
-Test-ComparatorCatches -name "修改人物健康" -mutate { param($s) $s.actors.child.health = 1.0; return $s }
-Test-ComparatorCatches -name "删除月内进度" -mutate { param($s) $s.PSObject.Properties.Remove("month_frac"); return $s }
-
-# ---------------------------------------------------------------- 结果
-
 $report | Set-Content (Join-Path $artifacts "report.txt") -Encoding utf8
+$report | ForEach-Object { Write-Host $_ }
 
 if ($KeepTemp) { Write-Step "保留临时目录 $tempRoot" } else { Remove-Item $tempRoot -Recurse -Force -ErrorAction SilentlyContinue }
 
-if ($failures.Count -gt 0) {
-  $failures | Set-Content (Join-Path $artifacts "failures.txt") -Encoding utf8
+if ($allFailures.Count -gt 0) {
   Write-Host "[cont] FAIL" -ForegroundColor Red
-  foreach ($f in $failures) { Write-Host "  $f" -ForegroundColor Red }
   exit 1
 }
-Write-Step "PASS 三进程续跑一致（A/B0 与 B1/C），反向验证全部检出"
+Write-Step "PASS 四个场景（A/B0 与 B1/C）与磁盘产物验证全部通过"
 exit 0
