@@ -765,6 +765,27 @@ func _child_event_ok(ev: Dictionary) -> bool:
 	return true
 
 
+func _child_flavor() -> String:
+	# M2-07：同一件童年小事，在不同人家读起来不一样
+	var parts: Array = []
+	match father_trade:
+		"匠":
+			parts.append("父亲在院里刨木头，刨花落在你脚边。")
+		"商":
+			parts.append("父亲在灯下打算盘，珠子声一直响到你睡着。")
+		"兵":
+			parts.append("父亲在磨刀，磨一会儿就抬头看看门口。")
+		"吏":
+			parts.append("父亲在抄文书，纸边堆得老高。")
+		_:
+			parts.append("父亲从地里回来，鞋上都是泥。")
+	if money < 300:
+		parts.append("锅里是稀的。")
+	elif money > 3000:
+		parts.append("灶上还留着肉。")
+	return " ".join(parts)
+
+
 func _child_year() -> void:
 	var pool: Array = []
 	for e in CHILD_EVENTS:
@@ -779,6 +800,7 @@ func _child_year() -> void:
 	var ev: Dictionary = _pick_from(pool)
 	child_last = str(ev["id"])
 	_apply_child_event(child_last)
+	_toast(_child_flavor(), Color(0.42, 0.34, 0.22))
 
 
 func _apply_child_event(id: String) -> void:
@@ -1934,6 +1956,39 @@ func _run_verify_smoke() -> void:
 	facts = keep_floor_facts
 	fact_floor = keep_floor
 	fact_seq = keep_seq
+
+	# M2-07：童年事件确实按父母性情与家境筛选，且同一件事在不同人家读起来不同
+	var keep_ct := mother_temper
+	var keep_ft := father_trade
+	var keep_money7 := money
+	var keep_age7b := age
+	age = 5
+	mother_temper = "严"
+	var g_strict: bool = _child_event_ok({"id": "scold", "min_age": 2, "mother": "严"})
+	var g_mild: bool = _child_event_ok({"id": "needle", "min_age": 3, "mother": "和"})
+	mother_temper = "和"
+	money = 100
+	var g_poor: bool = _child_event_ok({"id": "pawn_ring", "min_age": 2, "cond": "poor"})
+	money = 5000
+	var g_rich: bool = _child_event_ok({"id": "pawn_ring", "min_age": 2, "cond": "poor"})
+	father_trade = "匠"
+	money = 100
+	var flavor_craft := _child_flavor()
+	father_trade = "农"
+	money = 5000
+	var flavor_farm := _child_flavor()
+	mother_temper = keep_ct
+	father_trade = keep_ft
+	money = keep_money7
+	age = keep_age7b
+	var child_ok: bool = g_strict and not g_mild and g_poor and not g_rich \
+		and flavor_craft != flavor_farm and flavor_craft.find("刨") >= 0 and flavor_farm.find("泥") >= 0
+	if child_ok:
+		oks += 1
+		print("[VERIFY] PASS child_events_shaped_by_family craft=", flavor_craft.length(), " farm=", flavor_farm.length())
+	else:
+		fails.append("child_events_shaped_by_family")
+		print("[VERIFY] FAIL child_events_shaped_by_family strict=", g_strict, " mild=", g_mild, " poor=", g_poor, " rich=", g_rich, " craft=", flavor_craft, " farm=", flavor_farm)
 
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
