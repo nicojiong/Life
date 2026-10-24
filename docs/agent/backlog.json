@@ -57,8 +57,9 @@
                       "owner":  null,
                       "evidence":  [
                                        "docs/verification/M0-02.md",
-                                       "docs/tasks/M0-02.md",
-                                       "tools/verify.ps1"
+                                       "docs/verification/CI.md",
+                                       "tools/verify.ps1",
+                                       ".github/workflows/verify.yml"
                                    ],
                       "commit_sha":  null,
                       "remote_sha":  null,

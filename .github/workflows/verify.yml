@@ -1,0 +1,41 @@
+name: verify
+
+# 隔离验证入口：与本地 tools/verify.ps1 同一套断言
+# 注意：本工作流由 Agent 提交，但当前开发机没有 CI runner 与 gh CLI，
+#       **尚未在 GitHub Actions 上真实运行过**。首次运行可能因引擎下载地址或
+#       PowerShell 在 Linux 上的行为需要调整，见 docs/verification/CI.md。
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  isolated-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Godot 4.7.2 (headless)
+        run: |
+          set -euo pipefail
+          ZIP=Godot_v4.7.2-stable_linux.x86_64.zip
+          curl -fsSL -o /tmp/godot.zip "https://github.com/godotengine/godot/releases/download/4.7.2-stable/${ZIP}"
+          mkdir -p /tmp/godot
+          unzip -q /tmp/godot.zip -d /tmp/godot
+          chmod +x /tmp/godot/Godot_v4.7.2-stable_linux.x86_64
+          /tmp/godot/Godot_v4.7.2-stable_linux.x86_64 --version
+
+      - name: Run isolated verification
+        run: pwsh -NoProfile -File tools/verify.ps1 -GodotPath /tmp/godot/Godot_v4.7.2-stable_linux.x86_64
+
+      - name: Upload log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-log
+          path: |
+            /tmp/life-verify-*/run.log
+          if-no-files-found: warn

@@ -36,8 +36,16 @@ $runId = [guid]::NewGuid().ToString('N').Substring(0, 8)
 $testName = "LifeVerify-$runId"
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) "life-verify-$runId"
 $proj = Join-Path $tempRoot 'project'
-$userDir = Join-Path $env:APPDATA "Godot\app_userdata\$testName"
-$realUserDir = Join-Path $env:APPDATA 'Godot\app_userdata\浮生'
+# 用户数据根：Windows 用 APPDATA，Linux/macOS 用 XDG 约定（CI 需要）
+$isWin = ($env:OS -eq 'Windows_NT')
+if ($isWin) {
+    $appDataRoot = $env:APPDATA
+} else {
+    $appDataRoot = Join-Path $HOME '.local/share'
+}
+$userBase = Join-Path (Join-Path $appDataRoot 'Godot') 'app_userdata'
+$userDir = Join-Path $userBase $testName
+$realUserDir = Join-Path $userBase '浮生'
 
 Write-Host "[verify] run=$runId godot=$GodotPath"
 Write-Host "[verify] 隔离项目=$proj"

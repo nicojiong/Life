@@ -17,12 +17,12 @@
     "commit_sha":  "07fbe20d45fa6d8ce4c9ff0914471a74b2a92401",
     "remote_sha":  "07fbe20d45fa6d8ce4c9ff0914471a74b2a92401",
     "pr_url":  null,
-    "ci_status":  "not_configured",
+    "ci_status":  "workflow_committed_not_run",
     "integrated_sha":  null,
-    "blocked_reason":  "PR 无法自动创建：本机无 gh CLI 与 API token；分支已推送，待人工评审",
+    "blocked_reason":  "PR 与 CI 均无法自动验证：本机无 gh CLI / token / runner；工作流已提交待首次运行",
     "evidence":  [
                      "docs/BASELINE.md",
                      "docs/tasks/M0-01.md"
                  ],
-    "next_step":  "推送后记录 SHA；M1-01b：年龄/健康/寿数收拢到 actor 表"
+    "next_step":  "推送后记录 SHA；最后一轮做整体交付报告"
 }

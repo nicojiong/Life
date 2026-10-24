@@ -143,6 +143,8 @@ var facts: Array = []
 const FACT_CAP := 240
 ## M1-01a：人物关系（id → attitude），由世界持有，不随场景重建消失
 var relations: Dictionary = {}
+## 测试时关掉年度随机事件，避免随机扣血/扣钱干扰断言
+var events_enabled := true
 
 
 func _log_fact(kind: String, cause: String, data: Dictionary = {}) -> void:
@@ -1022,8 +1024,11 @@ func _run_verify_smoke() -> void:
 	health = 60.0
 	last_settled_year = year - 1
 	var keep_money3 := money
-	money = 50000  # 保证年关付得起，不触发"欠年"扣血，单看老化
+	var keep_events := events_enabled
+	events_enabled = false  # 年度随机事件会扣血扣钱，先关掉只看老化
+	money = 50000  # 保证年关付得起，不触发"欠年"扣血
 	_on_new_year()
+	events_enabled = keep_events
 	var father_hp := float((pov_state.get("father", {}) as Dictionary).get("health", 0.0))
 	if is_equal_approx(father_hp, 39.2) and is_equal_approx(health, 60.0):
 		oks += 1
@@ -4191,6 +4196,8 @@ func _event_ok(ev: Dictionary) -> bool:
 
 
 func _roll_event() -> void:
+	if not events_enabled:
+		return
 	if _rnd() > 0.32:
 		return
 	var pool: Array = []
