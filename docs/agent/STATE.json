@@ -12,8 +12,8 @@
     "current_task":  "M1-04",
     "next_task":  "M1-04",
     "task_status":  "in_progress",
-    "branch":  "agent/M1-04c-atomic-save",
-    "base_sha":  "f019e8d367cb5df74749ed1ffafc4badb98a1e01",
+    "branch":  "agent/M1-04d-migration",
+    "base_sha":  "c0e11dd1b169714a48f2a112fa4f7728c9e64a1f",
     "commit_sha":  "07fbe20d45fa6d8ce4c9ff0914471a74b2a92401",
     "remote_sha":  "07fbe20d45fa6d8ce4c9ff0914471a74b2a92401",
     "pr_url":  null,
@@ -24,5 +24,5 @@
                      "docs/BASELINE.md",
                      "docs/tasks/M0-01.md"
                  ],
-    "next_step":  "推送后记录 SHA；下一片 M1-04d：旧档迁移 fixtures，然后 M1-02 统一时钟"
+    "next_step":  "推送后记录 SHA；M1-04 剩余项（RNG、NPC 关系、事件队列）转 M1-03/M1-01；接着做 M1-02 统一时钟"
 }

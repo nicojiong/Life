@@ -461,8 +461,12 @@ func _load_game() -> bool:
 	father_name = str(d.get("father_name", father_name))
 	mother_name = str(d.get("mother_name", mother_name))
 	# A02：这些字段以前不存，读档后会变回新随机值或被重置
-	father_trade = str(d.get("father_trade", father_trade))
-	mother_temper = str(d.get("mother_temper", mother_temper))
+	# 旧档没有 father_trade 时按 origin_flags 推导，而不是沿用内存里的随机值
+	if d.has("father_trade"):
+		father_trade = str(d["father_trade"])
+	else:
+		father_trade = _father_trade_for(origin_flags)
+	mother_temper = str(d.get("mother_temper", "和"))
 	women_rank = int(d.get("women_rank", women_rank))
 	if d.get("scenes_done") is Dictionary:
 		scenes_done = d["scenes_done"]
@@ -878,6 +882,38 @@ func _run_verify_smoke() -> void:
 		print("[VERIFY] FAIL save_recovers_from_backup ok=", ok_backup,
 			" recovered=", recovered_from_backup, " money=", money)
 	recovered_from_backup = false
+
+	recovered_from_backup = false
+
+	# 旧档迁移：schema_version=1（无新字段）能读、有明确默认、再存即升级
+	var fx := FileAccess.open("res://tests/fixtures/save_v1.json", FileAccess.READ)
+	if fx != null:
+		var legacy_text := fx.get_as_text()
+		fx.close()
+		var w := FileAccess.open(_save_file(), FileAccess.WRITE)
+		if w != null:
+			w.store_string(legacy_text)
+			w.close()
+		var ok_v1 := _load_game()
+		var v1_defaults: bool = father_trade == "农" and women_rank == 0 \
+			and is_equal_approx(time_scale, 1.0) and save_schema_seen == 1 \
+			and name_text == "李守拙" and money == 3456 and mother_temper == "和"
+		# 迁移应体现在下一次保存
+		_save_game()
+		var reread := _read_save_dict(_save_file())
+		var upgraded: bool = int(reread.get("schema_version", 0)) == SAVE_SCHEMA_VERSION
+		if ok_v1 and v1_defaults and upgraded:
+			oks += 1
+			print("[VERIFY] PASS save_migrates_v1 upgraded_to=", reread.get("schema_version", 0))
+		else:
+			fails.append("save_migrates_v1")
+			print("[VERIFY] FAIL save_migrates_v1 ok=", ok_v1, " defaults=", v1_defaults,
+				" upgraded=", upgraded, " ft=", father_trade, " wr=", women_rank,
+				" ts=", time_scale, " schema=", save_schema_seen)
+	else:
+		fails.append("save_migrates_v1")
+		print("[VERIFY] FAIL save_migrates_v1 fixture_missing")
+	save_schema_seen = SAVE_SCHEMA_VERSION
 
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
