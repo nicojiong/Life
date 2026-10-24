@@ -646,6 +646,9 @@ func _load_game() -> bool:
 	child_pref = str(d.get("child_pref", child_pref))
 	if d.get("npc_state") is Dictionary:
 		npc_state = d["npc_state"]
+	if d.get("npc_log") is Array:
+		npc_log = d["npc_log"]
+	npc_seq = int(d.get("npc_seq", npc_seq))
 	_npc_ensure()
 	apprentice_state = str(d.get("apprentice_state", apprentice_state))
 	master_available = bool(d.get("master_available", master_available))
