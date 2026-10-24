@@ -933,6 +933,41 @@ func _content_issues() -> Array:
 	return issues
 
 
+func _run_life_slice(seed_value: int, years: int) -> Dictionary:
+	# M2-05：从出生开始跑一段完整人生，检查每一年的边界与阶段是否都发生
+	ended = false
+	busy = false
+	_init_sim_rng(seed_value)
+	_init_identity()
+	events_enabled = true
+	boundary_log = []
+	var settles := 0
+	var stages: Array = []
+	var money_ok := true
+	var hp_ok := true
+	for y in range(years):
+		if ended:
+			break
+		_advance_months(12)
+		if boundary_log.has("settle"):
+			settles += 1
+		stages.append(_autonomy_stage())
+		if money < 0:
+			money_ok = false
+		if health < 0.0 or health > 100.0:
+			hp_ok = false
+	return {
+		"age": age,
+		"ended": ended,
+		"settles": settles,
+		"stages": stages,
+		"money_ok": money_ok,
+		"hp_ok": hp_ok,
+		"facts": facts.size(),
+		"dead": (parent_dead as Dictionary).duplicate(true),
+	}
+
+
 func _replay_snapshot() -> Dictionary:
 	# M1-05：黄金重放要能回到同一起点，所以先把会被改动的状态整体存下来
 	return {
@@ -1821,6 +1856,26 @@ func _run_verify_smoke() -> void:
 	else:
 		fails.append("autonomy_stage_gates")
 		print("[VERIFY] FAIL autonomy_stage_gates ", s5, " ", s10, " ", s20, " marry=", g5_marry, " adult10=", g10_adult)
+
+	# M2-05：0-18 岁因果切片（放最后：它会重建一个新的人生）
+	var slice := _run_life_slice(2024, 18)
+	var stages: Array = slice["stages"]
+	var saw_minor := false
+	var saw_adult := false
+	for st in stages:
+		if str(st) == "minor":
+			saw_minor = true
+		if str(st) == "adult":
+			saw_adult = true
+	var slice_ok: bool = int(slice["age"]) >= 18 and not bool(slice["ended"]) \
+		and int(slice["settles"]) >= 18 and bool(slice["money_ok"]) and bool(slice["hp_ok"]) \
+		and saw_minor and saw_adult and int(slice["facts"]) > 0
+	if slice_ok:
+		oks += 1
+		print("[VERIFY] PASS life_slice_0_18 age=", slice["age"], " settles=", slice["settles"], " facts=", slice["facts"])
+	else:
+		fails.append("life_slice_0_18")
+		print("[VERIFY] FAIL life_slice_0_18 ", slice)
 
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money

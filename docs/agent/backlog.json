@@ -389,10 +389,10 @@
                                          "玩家能看见成本、承诺和已知信息；未知事实不提前泄漏",
                                          "真实试玩能解释前因后果；记录尚未解决的体验问题"
                                      ],
-                      "status":  "todo",
+                      "status":  "in_progress",
                       "owner":  null,
                       "evidence":  [
-
+                                       "docs/verification/M2-05a.md"
                                    ],
                       "commit_sha":  null,
                       "remote_sha":  null,
