@@ -1,3 +1,18 @@
+# PR：M1 可靠性底座 + M2 事件协议 + M3 事件数据化
+
+> **当前状态（2026-10-24，HEAD `d9f3a6b`）**
+>
+> - smoke 断言：**50** 条，本地与 CI（Linux）均通过
+> - 跨进程续跑：**四个场景**（plain / pending / death / frac），A/B0 与 B1/C 零差异
+> - 磁盘产物校验：未改动零差异；改事实/随机流/人物/删字段均报精确路径；恢复后通过
+> - CI：`isolated-smoke` 与 `continuity` 两个独立 job，均 success
+> - 存档 schema：**14**（本轮补 `boundary_log`、`player_build`）
+> - 阶段评审：`docs/REVIEW_M1.md` —— 可结束 Draft 进入合并审查，但 M1/M2 未完成
+> - `integrated_sha`：`null`（尚未合并）
+>
+> 以下为历史记录，其中"46 条断言""续跑未做""PR 因无 gh/token 阻塞"等均已过时。
+
+---
 # PR：M0 收尾 + M1 可靠性底座（汇总）
 
 > 本文件是 PR 描述草稿。分支 `agent/M1-ci-workflow` 是**一条连续提交链**，已包含此前
