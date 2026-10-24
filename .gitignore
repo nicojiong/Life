@@ -1,0 +1,12 @@
+﻿# Godot
+.godot/
+*.import
+export_presets.cfg
+
+# 运行产物
+run.log
+run.err.log
+*.tmp
+
+# 临时调试图
+docs/shots/_*.png

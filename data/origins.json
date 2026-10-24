@@ -1,0 +1,112 @@
+[
+  {
+    "id": "suzhou_tiller",
+    "region": "苏州",
+    "place": "苏州吴县",
+    "label": "佃农之子",
+    "line": "父{父}，佃种周氏田三十亩，终岁勤苦，仅得温饱。屋三间，与伯父共一牛。",
+    "money": 4200,
+    "attrs": {"health": 54, "learning": 1, "craft": 6, "spirit": 48, "fame": 2},
+    "flags": ["农家", "乡村"],
+    "weight": 26
+  },
+  {
+    "id": "suzhou_weaver",
+    "region": "苏州",
+    "place": "苏州吴县",
+    "label": "织户之子",
+    "line": "父{父}，织户。家中一架旧机，母亲与邻妇日夜织绢，一匹值钱八百。",
+    "money": 6800,
+    "attrs": {"health": 48, "learning": 3, "craft": 14, "spirit": 50, "fame": 4},
+    "flags": ["匠人", "乡村", "织户"],
+    "weight": 14
+  },
+  {
+    "id": "capital_clerk",
+    "region": "汴京",
+    "place": "开封府祥符县",
+    "label": "小吏之子",
+    "line": "父{父}，在开封府做押司，抄写文书二十余年，官不入品，却识得半个衙门的人。",
+    "money": 15000,
+    "attrs": {"health": 50, "learning": 18, "craft": 4, "spirit": 52, "fame": 10},
+    "flags": ["士人", "城中", "吏家"],
+    "weight": 12
+  },
+  {
+    "id": "capital_merchant",
+    "region": "汴京",
+    "place": "开封府",
+    "label": "行商之家",
+    "line": "父{父}，贩茶于汴京、江淮之间。家中常有三五客人吃酒，说的都是行市与时局。",
+    "money": 32000,
+    "attrs": {"health": 50, "learning": 8, "craft": 6, "spirit": 56, "fame": 12},
+    "flags": ["商贾", "城中"],
+    "weight": 11
+  },
+  {
+    "id": "capital_scholar",
+    "region": "汴京",
+    "place": "开封府",
+    "label": "寒士之后",
+    "line": "父{父}，三次落第，如今在巷口开一间书铺，替人抄书糊口。家中最值钱的是两架书。",
+    "money": 5200,
+    "attrs": {"health": 46, "learning": 24, "craft": 2, "spirit": 54, "fame": 6},
+    "flags": ["士人", "城中", "书香"],
+    "weight": 10
+  },
+  {
+    "id": "border_soldier",
+    "region": "延州",
+    "place": "鄜延路延州",
+    "label": "军户之子",
+    "line": "父{父}，延州厢军，屯田戍边。家中刀一口、弓一张，墙上挂着去岁阵亡叔父的名字。",
+    "money": 3600,
+    "attrs": {"health": 60, "learning": 2, "craft": 8, "spirit": 54, "fame": 6},
+    "flags": ["军户", "边地"],
+    "weight": 12
+  },
+  {
+    "id": "suzhou_scholar",
+    "region": "苏州",
+    "place": "苏州长洲县",
+    "label": "乡绅之家",
+    "line": "父{父}，有田二百亩，曾为县学助教。家中厅上悬一块旧匾，写着「耕读传家」。",
+    "money": 26000,
+    "attrs": {"health": 52, "learning": 22, "craft": 2, "spirit": 56, "fame": 16},
+    "flags": ["士人", "乡村", "乡绅"],
+    "weight": 8
+  },
+  {
+    "id": "capital_artisan",
+    "region": "汴京",
+    "place": "开封府",
+    "label": "匠户之子",
+    "line": "父{父}，木作行都料匠，营缮宫观寺院，工钱按月支给。家中锯凿斧墨斗俱全。",
+    "money": 9000,
+    "attrs": {"health": 52, "learning": 4, "craft": 16, "spirit": 50, "fame": 5},
+    "flags": ["匠人", "城中"],
+    "weight": 10
+  },
+  {
+    "id": "border_farmer",
+    "region": "延州",
+    "place": "鄜延路鄜州",
+    "label": "边地农家",
+    "line": "父{父}，种坡田二十亩，薄收。每逢西夏兵至，全村便躲进山坳的土窑。",
+    "money": 2600,
+    "attrs": {"health": 56, "learning": 0, "craft": 7, "spirit": 46, "fame": 1},
+    "flags": ["农家", "边地"],
+    "weight": 10
+  },
+  {
+    "id": "foundling",
+    "region": "苏州",
+    "place": "苏州吴县",
+    "label": "弃儿",
+    "line": "你生在腊月，被人放在城南桥头。养父{父}是个鞋匠，抱你回家那夜，雪下了三寸。",
+    "money": 1800,
+    "attrs": {"health": 42, "learning": 1, "craft": 10, "spirit": 58, "fame": 0},
+    "flags": ["匠人", "乡村", "养子"],
+    "weight": 4
+  }
+]
