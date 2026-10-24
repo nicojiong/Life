@@ -245,20 +245,20 @@ const SAVE_DIR := "user://"
 ## 随机事件池：每年 32% 概率触发一条，按年龄与身份筛选
 ## M2-02：机会定义。weight 决定被抽中的相对概率，cooldown 是最短复发间隔（月）
 const EVENTS := [
-	{"id": "drought", "min_age": 8, "weight": 3, "cooldown": 60},
-	{"id": "flood", "min_age": 8, "weight": 3, "cooldown": 60},
-	{"id": "levy", "min_age": 12, "weight": 4, "cooldown": 24},
-	{"id": "thieves", "min_age": 12, "weight": 2, "cooldown": 36},
-	{"id": "plague", "min_age": 10, "weight": 1, "cooldown": 120},
-	{"id": "suit", "min_age": 16, "weight": 3, "cooldown": 24},
-	{"id": "wedding", "min_age": 10, "weight": 3, "cooldown": 36},
-	{"id": "harvest", "min_age": 16, "cond": "farm", "weight": 4, "cooldown": 12},
-	{"id": "reward", "min_age": 20, "cond": "famous", "weight": 2, "cooldown": 36},
-	{"id": "school", "min_age": 25, "cond": "parent", "weight": 2, "cooldown": 60},
-	{"id": "rash", "min_age": 1, "max_age": 6, "weight": 2, "cooldown": 12},
-	{"id": "riverfall", "min_age": 2, "max_age": 7, "weight": 2, "cooldown": 12},
-	{"id": "find_coin", "min_age": 3, "max_age": 8, "weight": 2, "cooldown": 12},
-	{"id": "quarrel", "min_age": 3, "max_age": 9, "weight": 2, "cooldown": 12},
+	{"id": "drought", "name": "旱", "min_age": 8, "weight": 3, "cooldown": 60},
+	{"id": "flood", "name": "水", "min_age": 8, "weight": 3, "cooldown": 60},
+	{"id": "levy", "name": "加赋", "min_age": 12, "weight": 4, "cooldown": 24},
+	{"id": "thieves", "name": "盗", "min_age": 12, "weight": 2, "cooldown": 36},
+	{"id": "plague", "name": "疫", "min_age": 10, "weight": 1, "cooldown": 120},
+	{"id": "suit", "name": "讼", "min_age": 16, "weight": 3, "cooldown": 24},
+	{"id": "wedding", "name": "婚嫁", "min_age": 10, "weight": 3, "cooldown": 36},
+	{"id": "harvest", "name": "丰年", "min_age": 16, "cond": "farm", "weight": 4, "cooldown": 12},
+	{"id": "reward", "name": "旌表", "min_age": 20, "cond": "famous", "weight": 2, "cooldown": 36},
+	{"id": "school", "name": "入学", "min_age": 25, "cond": "parent", "weight": 2, "cooldown": 60},
+	{"id": "rash", "name": "疹", "min_age": 1, "max_age": 6, "weight": 2, "cooldown": 12},
+	{"id": "riverfall", "name": "落水", "min_age": 2, "max_age": 7, "weight": 2, "cooldown": 12},
+	{"id": "find_coin", "name": "拾钱", "min_age": 3, "max_age": 8, "weight": 2, "cooldown": 12},
+	{"id": "quarrel", "name": "口角", "min_age": 3, "max_age": 9, "weight": 2, "cooldown": 12},
 ]
 
 ## 各地点允许去的最小年龄；太小的时候只能在家
@@ -881,6 +881,8 @@ func _content_issues() -> Array:
 		if seen_ev.has(eid):
 			issues.append("dup_event:" + eid)
 		seen_ev[eid] = true
+		if str((ev as Dictionary).get("name", "")) == "":
+			issues.append("event_without_name:" + eid)
 		var ma := int((ev as Dictionary).get("min_age", 0))
 		var xa := int((ev as Dictionary).get("max_age", 120))
 		if ma < 0 or ma > 100 or xa < ma:
@@ -1764,6 +1766,36 @@ func _run_verify_smoke() -> void:
 	last_event_fid = 0
 	last_boundary_fid = 0
 	age = keep_chain_age
+
+	# M2-03b：墓志用事实写出具体年份的具体事
+	facts = []
+	fact_seq = 0
+	var keep_story_age := age
+	var keep_birth := birth_year
+	birth_year = 1040
+	var keep_year := year
+	var keep_month := month
+	year = 1053
+	month = 4
+	_log_fact("event", "opportunity", {"id": "drought"})
+	var lines_story := _story_lines()
+	var expected_line := "十三岁那年，旱。"
+	var story_ok: bool = lines_story.size() == 1 and str(lines_story[0]) == expected_line
+	# 空日志时不应编造句子
+	facts = []
+	var lines_empty := _story_lines()
+	if story_ok and lines_empty.is_empty():
+		oks += 1
+		print("[VERIFY] PASS epitaph_story_lines ", lines_story)
+	else:
+		fails.append("epitaph_story_lines")
+		print("[VERIFY] FAIL epitaph_story_lines ", lines_story, " empty=", lines_empty.size())
+	year = keep_year
+	month = keep_month
+	age = keep_story_age
+	birth_year = keep_birth
+	facts = []
+	fact_seq = 0
 
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
@@ -5202,6 +5234,44 @@ func given_text() -> String:
 	return name_text.substr(1) if name_text.length() > 1 else name_text
 
 
+func _event_name(id: String) -> String:
+	for e in EVENTS:
+		if str((e as Dictionary).get("id", "")) == id:
+			return str((e as Dictionary).get("name", id))
+	return id
+
+
+func _age_at_month(t: int) -> int:
+	return int(t / 12) - birth_year
+
+
+func _story_lines() -> Array:
+	# M2-03b：用事实日志写人话。只写真实发生过的，且越晚越靠后
+	var lines: Array = []
+	var picked := 0
+	for f in facts:
+		if picked >= 3:
+			break
+		var fd: Dictionary = f
+		var kind := str(fd.get("kind", ""))
+		var age_at := _age_at_month(int(fd.get("t", 0)))
+		if age_at < 0 or age_at > 120:
+			continue
+		if kind == "event":
+			var eid := str((fd.get("data", {}) as Dictionary).get("id", ""))
+			lines.append("%s岁那年，%s。" % [DB.cn(age_at), _event_name(eid)])
+			picked += 1
+		elif kind == "exam":
+			var cause := str(fd.get("cause", ""))
+			if cause == "jieshi_pass":
+				lines.append("%s岁，解试中。" % DB.cn(age_at))
+				picked += 1
+			elif cause == "jieshi_fail":
+				lines.append("%s岁，解试落第。" % DB.cn(age_at))
+				picked += 1
+	return lines
+
+
 func _facts_trace() -> String:
 	# M1-03c：墓志必须引用真实发生过的事，而不是只拼终值
 	if facts.is_empty():
@@ -5284,6 +5354,8 @@ func _epitaph() -> Array:
 	var trace := _facts_trace()
 	if trace != "":
 		lines.append(trace)
+	for story_line in _story_lines():
+		lines.append(str(story_line))
 	if int(story.get("欠年", 0)) >= 3:
 		lines.append("晚年家道中落，靠乡邻接济度日。")
 	if story.has("赖账"):
