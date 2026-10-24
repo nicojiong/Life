@@ -117,3 +117,30 @@ exit=0
 - 本报告只写实际执行过的命令与结果；`not_run` 的项目都标注了原因。
 - 每个分支的 `docs/tasks/*.md` 与 `docs/verification/*.md` 记录了当轮的取舍、失败与已知限制，可逐条复核。
 - 游戏本身仍可在本地运行（`play.bat`），行为与 `main` 相比有上述改动，但**尚未经过真人试玩**——自动化断言证明的是一致性，不是"好不好玩"。
+
+
+---
+
+## 第二轮：修复与集成验收（2026-10-24 追加）
+
+基线 `33a768b` 之后，本轮补了四个已复现缺陷、一处按户结算、以及 CI 本身的两个问题。
+
+| 项 | 结果 |
+|---|---|
+| 父亲死亡后收益发给孩子 | 已修复，断言 `action_pov_change_no_reward` |
+| 父亲死亡重复结算 | 已修复，断言 `parent_death_settled_once` |
+| 真实事件用未保存的全局随机数 | 已修复（`_pick_from`），断言 `events_use_saved_rng` |
+| 未来版本存档被降级覆盖 | 已修复，断言 `save_rejects_future_version` |
+| 年关按户结算 | 已实现，断言 `household_year_cost`（1250 vs 单人口径 340） |
+| 冷却使用稳定行动标识 | 已实现，断言 `action_key_stable` |
+| CI Linux 路径大小写 / 日志产物 / 完整性校验 | 已修复，GitHub Actions run 40051930378 success |
+
+断言总数从 20 增到 **26**，本地与 CI 均通过。
+
+PR：**未创建**。本机无 `gh` CLI、无 `GITHUB_TOKEN`，无法调用 GitHub API 建 PR。
+汇总分支为 `agent/M1-ci-workflow`（一条连续链，含此前 16 个分支的全部提交），
+可在 https://github.com/nicojiong/Life/compare/main...agent/M1-ci-workflow?expand=1 一键开 PR。
+
+下一步：M1-03 五类随机流、M1-05 黄金重放，然后 M2/M3。
+
+详细证据见 `docs/verification/2026-10-24-integration.md` 与 `docs/verification/CI.md`。

@@ -1246,6 +1246,39 @@ func _run_verify_smoke() -> void:
 	age = keep_age4
 	lifespan = keep_life4
 
+	# 年关按户结算：扣的钱来自全家人口，不是当前视角那一个人的年龄
+	var keep_money5 := money
+	var keep_settled5 := last_settled_year
+	var keep_age5 := age
+	var keep_events5 := events_enabled
+	var keep_states5: Dictionary = (pov_state as Dictionary).duplicate(true)
+	events_enabled = false
+	# 把家人调到不会在年关当场病故的状态，否则这一年的户内人口会变
+	for k5 in pov_state.keys():
+		var st5: Dictionary = pov_state[k5]
+		st5["health"] = 95.0
+		st5["lifespan"] = 99
+		if int(st5.get("age", 0)) > 60:
+			st5["age"] = 40
+		pov_state[k5] = st5
+	age = 10
+	money = 50000
+	last_settled_year = year - 1
+	var expected_cost := _household_year_cost()
+	_on_new_year()
+	var paid := 50000 - money
+	events_enabled = keep_events5
+	pov_state = keep_states5
+	last_settled_year = keep_settled5
+	money = keep_money5
+	age = keep_age5
+	if paid == expected_cost and paid > 300 + 10 * 4:
+		oks += 1
+		print("[VERIFY] PASS household_year_cost paid=", paid, " single_actor_would_be=", 300 + 10 * 4)
+	else:
+		fails.append("household_year_cost")
+		print("[VERIFY] FAIL household_year_cost paid=", paid, " expected=", expected_cost)
+
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
 	var keep_age := age
@@ -4164,6 +4197,27 @@ func _advance_months(n: int) -> void:
 				return
 
 
+func _household_year_cost() -> int:
+	# M1-01b：年关按户算，与当前操控谁无关；已故的人不再吃饭
+	var total := 0
+	var members: Array = []
+	members.append({"age": age})
+	for k in pov_state.keys():
+		var key := str(k)
+		if key != "father" and key != "mother" and key != "child":
+			continue
+		if bool(parent_dead.get(key, false)):
+			continue
+		members.append(pov_state[k])
+	for m in members:
+		total += 150 + int((m as Dictionary).get("age", 0)) * 2
+	if married:
+		total += 200
+		total += children * 180
+		total += land * 18
+	return total
+
+
 func _decay_health(age_v: int, hp: float) -> float:
 	# 48 岁后每年掉一点，60 岁后掉得更快
 	var h := hp
@@ -4243,13 +4297,9 @@ func _on_new_year() -> void:
 			"父亲把刀递给你，又收了回去——那是他当兵时留下的。",
 			"从此以后，这个家要你自己撑了。",
 		], false)
-	# 年关：吃穿用度与赋税
+	# 年关：吃穿用度与赋税（按户结算，见 _household_year_cost）
 	if age >= 8:
-		var cost := 300 + age * 4
-		if married:
-			cost += 200
-		cost += children * 180
-		cost += land * 18
+		var cost := _household_year_cost()
 		if shop_open and bool(shop.get("helper", false)):
 			cost += 1800
 		if money >= cost:
