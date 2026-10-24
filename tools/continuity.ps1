@@ -25,8 +25,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
+$ErrorActionPreference = "Stop"
 $runId = [guid]::NewGuid().ToString("N").Substring(0, 8)
-$tempRoot = Join-Path $env:TEMP "life-cont-$runId"
+$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) "life-cont-$runId"
 if ([System.IO.Path]::IsPathRooted($ArtifactDir)) {
   $artifacts = $ArtifactDir
 } else {
@@ -34,6 +35,11 @@ if ([System.IO.Path]::IsPathRooted($ArtifactDir)) {
 }
 
 function Write-Step([string]$msg) { Write-Host "[cont] $msg" }
+try {
+  $null = 0
+} catch {
+}
+
 
 function Invoke-Godot {
   param([string]$Project, [string[]]$GodotArgs, [string]$LogPath, [int]$TimeoutSeconds = 180)
@@ -262,6 +268,7 @@ $report | Set-Content (Join-Path $artifacts "report.txt") -Encoding utf8
 if ($KeepTemp) { Write-Step "保留临时目录 $tempRoot" } else { Remove-Item $tempRoot -Recurse -Force -ErrorAction SilentlyContinue }
 
 if ($failures.Count -gt 0) {
+  $failures | Set-Content (Join-Path $artifacts "failures.txt") -Encoding utf8
   Write-Host "[cont] FAIL" -ForegroundColor Red
   foreach ($f in $failures) { Write-Host "  $f" -ForegroundColor Red }
   exit 1
