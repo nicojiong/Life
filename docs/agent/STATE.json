@@ -12,8 +12,8 @@
     "current_task":  "M1-02",
     "next_task":  "M1-04",
     "task_status":  "in_progress",
-    "branch":  "agent/M1-02b-year-settles-once",
-    "base_sha":  "76766e7312635d7615cdd6ae6544855ba01d630b",
+    "branch":  "agent/M1-02c-actor-aging",
+    "base_sha":  "1c0b47f7b2c1d4e9a12e73adaba3677aa9c5787f",
     "commit_sha":  "07fbe20d45fa6d8ce4c9ff0914471a74b2a92401",
     "remote_sha":  "07fbe20d45fa6d8ce4c9ff0914471a74b2a92401",
     "pr_url":  null,
@@ -24,5 +24,5 @@
                      "docs/BASELINE.md",
                      "docs/tasks/M0-01.md"
                  ],
-    "next_step":  "推送后记录 SHA；M1-02c：跨 POV 的年度结算"
+    "next_step":  "推送后记录 SHA；下一轮 M1-03 可复现随机流与因果日志"
 }

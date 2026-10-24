@@ -962,6 +962,32 @@ func _run_verify_smoke() -> void:
 	age = keep_age3
 	last_settled_year = keep_settled
 
+	# M1-02c：不操控父母时，他们的老化与死亡照样发生
+	var keep_father: Dictionary = (pov_state.get("father", {}) as Dictionary).duplicate(true)
+	var keep_settled2 := last_settled_year
+	var keep_hp2 := health
+	var f_state: Dictionary = pov_state.get("father", {})
+	f_state["age"] = 55
+	f_state["health"] = 40.0
+	f_state["lifespan"] = 90
+	pov_state["father"] = f_state
+	health = 60.0
+	last_settled_year = year - 1
+	var keep_money3 := money
+	money = 50000  # 保证年关付得起，不触发"欠年"扣血，单看老化
+	_on_new_year()
+	var father_hp := float((pov_state.get("father", {}) as Dictionary).get("health", 0.0))
+	if is_equal_approx(father_hp, 39.2) and is_equal_approx(health, 60.0):
+		oks += 1
+		print("[VERIFY] PASS actors_age_independently father_hp=", father_hp, " self_hp=", health)
+	else:
+		fails.append("actors_age_independently")
+		print("[VERIFY] FAIL actors_age_independently father_hp=", father_hp, " self_hp=", health)
+	pov_state["father"] = keep_father
+	last_settled_year = keep_settled2
+	health = keep_hp2
+	money = keep_money3
+
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
 	var keep_age := age
@@ -3840,6 +3866,16 @@ func _advance_months(n: int) -> void:
 				return
 
 
+func _decay_health(age_v: int, hp: float) -> float:
+	# 48 岁后每年掉一点，60 岁后掉得更快
+	var h := hp
+	if age_v > 48:
+		h -= 0.8
+	if age_v > 60:
+		h -= 1.4
+	return maxf(0.0, h)
+
+
 func _on_new_year() -> void:
 	# M1-02b：年关每年只结算一次，防重入（过场、嵌套推进、重复调用）
 	if last_settled_year >= year:
@@ -3847,10 +3883,23 @@ func _on_new_year() -> void:
 		return
 	last_settled_year = year
 	scenes_done.clear()
-	if age > 48:
-		health = maxf(0.0, health - 0.8)
-	if age > 60:
-		health = maxf(0.0, health - 1.4)
+	# M1-02c：每个活着的人各自老化扣血，不因当前操控谁而改变
+	health = _decay_health(age, health)
+	for k in pov_state.keys():
+		var st: Dictionary = pov_state[k]
+		var st_age := int(st.get("age", 0))
+		var st_hp := _decay_health(st_age, float(st.get("health", 100.0)))
+		st["health"] = st_hp
+		var st_life := int(st.get("lifespan", 100))
+		var kid := str(k)
+		if kid in ["father", "mother"] and not bool(parent_dead.get(kid, false)) \
+				and (st_age >= st_life or st_hp <= 0.0):
+			parent_dead[kid] = true
+			parent_death_year[kid] = year
+			parents_alive = maxi(0, parents_alive - 1)
+			_toast("%s也走了，就在这一年。" % (father_name if kid == "father" else mother_name),
+				Color(0.62, 0.24, 0.18))
+			_spawn_npcs()
 	if health <= 0.0:
 		lifespan = age
 	if age == 1 and not milestones.has("zhuazhou"):
