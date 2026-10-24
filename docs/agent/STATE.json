@@ -9,11 +9,11 @@
     "godot_run":  "import_only",
     "game_code_modified":  false,
     "remote_mutations_performed":  true,
-    "current_task":  "M1-04",
+    "current_task":  "M1-02",
     "next_task":  "M1-04",
     "task_status":  "in_progress",
-    "branch":  "agent/M1-04d-migration",
-    "base_sha":  "c0e11dd1b169714a48f2a112fa4f7728c9e64a1f",
+    "branch":  "agent/M1-02a-action-cooldown",
+    "base_sha":  "2fa4a31cf6b752c519c1fd3ed22592dbc14a9d63",
     "commit_sha":  "07fbe20d45fa6d8ce4c9ff0914471a74b2a92401",
     "remote_sha":  "07fbe20d45fa6d8ce4c9ff0914471a74b2a92401",
     "pr_url":  null,
@@ -24,5 +24,5 @@
                      "docs/BASELINE.md",
                      "docs/tasks/M0-01.md"
                  ],
-    "next_step":  "推送后记录 SHA；M1-04 剩余项（RNG、NPC 关系、事件队列）转 M1-03/M1-01；接着做 M1-02 统一时钟"
+    "next_step":  "推送后记录 SHA；M1-02b：年关/生日/死亡的时间边界队列"
 }

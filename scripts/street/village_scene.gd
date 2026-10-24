@@ -105,12 +105,14 @@ var women_rank := 0
 var month_frac := 0.0
 
 ## 存档格式版本：字段增删时递增，读档据此做迁移
-const SAVE_SCHEMA_VERSION := 2
+const SAVE_SCHEMA_VERSION := 3
 var save_schema_seen := 0
 ## A03：父母是否已故（保留人物记录，不用删除表示死亡）
 var parent_dead := {"father": false, "mother": false}
 var parent_death_year := {"father": 0, "mother": 0}
 var recovered_from_backup := false
+## M1-02：每个行动的世界时间冷却（键 = 行动标签，值 = 可再次执行的月份序号）
+var action_cooldown := {}
 
 var _re_time := RegEx.new()
 
@@ -330,6 +332,7 @@ func _state_dict() -> Dictionary:
 		"women_rank": women_rank, "scenes_done": scenes_done, "child_last": child_last,
 		"time_scale": time_scale, "slot": slot,
 		"parent_dead": parent_dead, "parent_death_year": parent_death_year,
+		"action_cooldown": action_cooldown,
 		"px": player.x, "py": player.y, "hour": hour,
 		"birth_year": birth_year, "father_name": father_name, "mother_name": mother_name,
 	}
@@ -480,6 +483,8 @@ func _load_game() -> bool:
 		var py: Dictionary = d["parent_death_year"]
 		for k in py.keys():
 			parent_death_year[str(k)] = int(py[k])
+	if d.get("action_cooldown") is Dictionary:
+		action_cooldown = d["action_cooldown"]
 	save_schema_seen = int(d.get("schema_version", 1))
 	return true
 
@@ -914,6 +919,25 @@ func _run_verify_smoke() -> void:
 		fails.append("save_migrates_v1")
 		print("[VERIFY] FAIL save_migrates_v1 fixture_missing")
 	save_schema_seen = SAVE_SCHEMA_VERSION
+
+	# M1-02：同一件事不能靠连点反复刷收益（冷却 = 声明的 months）
+	action_cooldown = {}
+	money = 500
+	var keep_age2 := age
+	age = 5  # 避开年关结算，只观察收益是否重复
+	var spam := {"label": "测试短活", "months": 1, "gain": {"money": 300}}
+	_on_action(spam)
+	var after_first := money
+	_on_action(spam)
+	var after_second := money
+	age = keep_age2
+	if after_first == 800 and after_second == 800:
+		oks += 1
+		print("[VERIFY] PASS action_cooldown_blocks_spam money=", after_second)
+	else:
+		fails.append("action_cooldown_blocks_spam")
+		print("[VERIFY] FAIL action_cooldown_blocks_spam first=", after_first, " second=", after_second)
+	action_cooldown = {}
 
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
@@ -2513,6 +2537,9 @@ func _on_dialog_choice(ch: Dictionary, id: String) -> void:
 	if cost > money:
 		_toast("钱不够。", Color(0.62, 0.24, 0.18))
 		return
+	# M1-02：对话与地点行动共用同一套冷却结算，且都不再推进月份
+	if not _cooldown_ready(str(ch.get("label", ""))):
+		return
 	money -= cost
 	if ch.has("once"):
 		story[str(ch["once"])] = true
@@ -2529,7 +2556,8 @@ func _on_dialog_choice(ch: Dictionary, id: String) -> void:
 	panel.visible = false
 	busy = false
 	_unfreeze_npc(id)
-	_advance_months(int(ch.get("months", 1)))
+	_cooldown_commit(str(ch.get("label", "")), int(ch.get("months", 1)))
+	# M1-02：对话不再额外推进月份，时间由世界钟与节令推进
 	if ch.has("result"):
 		_toast(str(ch["result"]), Color(0.30, 0.26, 0.21))
 	Sfx.play("ok")
@@ -3268,6 +3296,28 @@ func _run_shop(months: int) -> void:
 			Color(0.30, 0.42, 0.22) if profit >= 0 else Color(0.62, 0.24, 0.18))
 
 
+func _month_index() -> int:
+	return year * 12 + month
+
+
+func _cooldown_ready(label: String) -> bool:
+	# 同一件事在冷却期内不能再做（冷却从"这次做完之后"开始算）
+	if label == "":
+		return true
+	var now := _month_index()
+	var ready_at := int(action_cooldown.get(label, 0))
+	if ready_at > now:
+		_toast("这事刚做过，再过 %d 个月。" % (ready_at - now), Color(0.62, 0.24, 0.18))
+		return false
+	return true
+
+
+func _cooldown_commit(label: String, months: int) -> void:
+	if label == "":
+		return
+	action_cooldown[label] = _month_index() + maxi(1, months)
+
+
 func _on_action(act: Dictionary) -> void:
 	if ended:
 		return
@@ -3281,6 +3331,10 @@ func _on_action(act: Dictionary) -> void:
 			if k == "learning" and learning < float(req[k]):
 				_toast("还做不了这个。", Color(0.62, 0.24, 0.18))
 				return
+
+	# M1-02：冷却检查必须在扣钱、关面板之前
+	if not _cooldown_ready(str(act.get("label", ""))):
+		return
 
 	money -= cost
 	panel.visible = false
@@ -3303,6 +3357,8 @@ func _on_action(act: Dictionary) -> void:
 			return
 	if act.has("flag"):
 		story[str(act["flag"])] = true
+	# M1-02：结算完成后才开始计时，长期行动已用自己的 months 付过账
+	_cooldown_commit(str(act.get("label", "")), int(act.get("months", 1)))
 	if act.has("flavor"):
 		_toast(str(act["flavor"]), Color(0.30, 0.26, 0.21))
 	var got_money := false
