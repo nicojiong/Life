@@ -113,6 +113,8 @@ var parent_death_year := {"father": 0, "mother": 0}
 var recovered_from_backup := false
 ## M1-02：每个行动的世界时间冷却（键 = 行动标签，值 = 可再次执行的月份序号）
 var action_cooldown := {}
+## M1-02b：年关结算水位，保证一年只结算一次
+var last_settled_year := 0
 
 var _re_time := RegEx.new()
 
@@ -332,7 +334,7 @@ func _state_dict() -> Dictionary:
 		"women_rank": women_rank, "scenes_done": scenes_done, "child_last": child_last,
 		"time_scale": time_scale, "slot": slot,
 		"parent_dead": parent_dead, "parent_death_year": parent_death_year,
-		"action_cooldown": action_cooldown,
+		"action_cooldown": action_cooldown, "last_settled_year": last_settled_year,
 		"px": player.x, "py": player.y, "hour": hour,
 		"birth_year": birth_year, "father_name": father_name, "mother_name": mother_name,
 	}
@@ -485,6 +487,7 @@ func _load_game() -> bool:
 			parent_death_year[str(k)] = int(py[k])
 	if d.get("action_cooldown") is Dictionary:
 		action_cooldown = d["action_cooldown"]
+	last_settled_year = int(d.get("last_settled_year", last_settled_year))
 	save_schema_seen = int(d.get("schema_version", 1))
 	return true
 
@@ -938,6 +941,26 @@ func _run_verify_smoke() -> void:
 		fails.append("action_cooldown_blocks_spam")
 		print("[VERIFY] FAIL action_cooldown_blocks_spam first=", after_first, " second=", after_second)
 	action_cooldown = {}
+
+	# M1-02b：年关每年只结算一次（防重入）
+	var keep_money2 := money
+	var keep_age3 := age
+	var keep_settled := last_settled_year
+	age = 30
+	money = 10000
+	last_settled_year = year - 1
+	_on_new_year()
+	var once := money
+	_on_new_year()
+	if once < 10000 and money == once:
+		oks += 1
+		print("[VERIFY] PASS new_year_settles_once deducted=", 10000 - once)
+	else:
+		fails.append("new_year_settles_once")
+		print("[VERIFY] FAIL new_year_settles_once once=", once, " twice=", money)
+	money = keep_money2
+	age = keep_age3
+	last_settled_year = keep_settled
 
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
@@ -3818,6 +3841,11 @@ func _advance_months(n: int) -> void:
 
 
 func _on_new_year() -> void:
+	# M1-02b：年关每年只结算一次，防重入（过场、嵌套推进、重复调用）
+	if last_settled_year >= year:
+		print("[YEAR] settle_skipped year=", year, " last=", last_settled_year)
+		return
+	last_settled_year = year
 	scenes_done.clear()
 	if age > 48:
 		health = maxf(0.0, health - 0.8)

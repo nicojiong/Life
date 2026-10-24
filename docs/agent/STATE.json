@@ -12,8 +12,8 @@
     "current_task":  "M1-02",
     "next_task":  "M1-04",
     "task_status":  "in_progress",
-    "branch":  "agent/M1-02a-action-cooldown",
-    "base_sha":  "2fa4a31cf6b752c519c1fd3ed22592dbc14a9d63",
+    "branch":  "agent/M1-02b-year-settles-once",
+    "base_sha":  "76766e7312635d7615cdd6ae6544855ba01d630b",
     "commit_sha":  "07fbe20d45fa6d8ce4c9ff0914471a74b2a92401",
     "remote_sha":  "07fbe20d45fa6d8ce4c9ff0914471a74b2a92401",
     "pr_url":  null,
@@ -24,5 +24,5 @@
                      "docs/BASELINE.md",
                      "docs/tasks/M0-01.md"
                  ],
-    "next_step":  "推送后记录 SHA；M1-02b：年关/生日/死亡的时间边界队列"
+    "next_step":  "推送后记录 SHA；M1-02c：跨 POV 的年度结算"
 }
