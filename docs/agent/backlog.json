@@ -419,7 +419,8 @@
                       "status":  "in_progress",
                       "owner":  null,
                       "evidence":  [
-                                       "docs/verification/M3-01a.md"
+                                       "docs/verification/M3-01a.md",
+                                       "docs/verification/M3-02a.md"
                                    ],
                       "commit_sha":  null,
                       "remote_sha":  null,

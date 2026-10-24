@@ -1981,6 +1981,33 @@ func _run_verify_smoke() -> void:
 		fails.append("child_events_shaped_by_family")
 		print("[VERIFY] FAIL child_events_shaped_by_family strict=", g_strict, " mild=", g_mild, " poor=", g_poor, " rich=", g_rich, " craft=", flavor_craft, " farm=", flavor_farm)
 
+	# M3-02：效果与文案来自 JSON——连一条只写在数据里的新事件也能生效
+	var keep_money8 := money
+	var keep_hp8 := health
+	var keep_fame8 := fame
+	var keep_story8: Dictionary = (story as Dictionary).duplicate(true)
+	money = 1000
+	health = 80.0
+	fame = 10.0
+	story.erase("落水")
+	_apply_event("temple_fair")
+	var data_money_ok: bool = money == 1030
+	var data_fame_ok: bool = is_equal_approx(fame, 12.0)
+	_apply_event("riverfall")
+	var data_story_ok: bool = story.has("落水")
+	_apply_event("drought")
+	var data_delta_ok: bool = money == 330 or money == 300
+	money = keep_money8
+	health = keep_hp8
+	fame = keep_fame8
+	story = keep_story8
+	if data_money_ok and data_fame_ok and data_story_ok and data_delta_ok:
+		oks += 1
+		print("[VERIFY] PASS event_effects_from_data temple=+30 riverfall_story=", data_story_ok)
+	else:
+		fails.append("event_effects_from_data")
+		print("[VERIFY] FAIL event_effects_from_data money=", data_money_ok, " fame=", data_fame_ok, " story=", data_story_ok, " drought=", data_delta_ok)
+
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
 	var keep_age := age
@@ -5273,8 +5300,31 @@ func _roll_event() -> void:
 	_drain_due_events()
 
 
+func _apply_event_effects(def: Dictionary) -> void:
+	var eff: Dictionary = def.get("effects", {})
+	var d_money := int(eff.get("money", 0))
+	var d_health := float(eff.get("health", 0.0))
+	var d_fame := float(eff.get("fame", 0.0))
+	if d_money != 0:
+		money = maxi(0, money + d_money)
+	if d_health != 0.0:
+		health = clampf(health + d_health, 0.0, 100.0)
+	if d_fame != 0.0:
+		fame = clampf(fame + d_fame, 0.0, 100.0)
+	if eff.has("story"):
+		story[str(eff["story"])] = true
+	var txt := str(def.get("text", ""))
+	if txt != "":
+		var bad_news: bool = d_money < 0 or d_health < 0.0 or d_fame < 0.0
+		_toast(txt, Color(0.62, 0.24, 0.18) if bad_news else Color(0.30, 0.42, 0.22))
+
+
 func _apply_event(id: String) -> void:
-	# 事实日志由 _drain_due_events 记录（带实例 sid 与来源）
+	# M3-02：有 effects 的事件由数据驱动；没有的（疫/丰年要按状态算）仍走下面的代码
+	var def := DB.event_def(id)
+	if def.has("effects"):
+		_apply_event_effects(def)
+		return
 	var bad := Color(0.62, 0.24, 0.18)
 	var good := Color(0.30, 0.42, 0.22)
 	match id:

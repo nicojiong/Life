@@ -114,3 +114,10 @@ func cn(n: int) -> String:
 	if rest % 10 != 0:
 		t += str(d[rest % 10])
 	return t
+
+
+func event_def(id: String) -> Dictionary:
+	for e in events:
+		if str((e as Dictionary).get("id", "")) == id:
+			return e
+	return {}

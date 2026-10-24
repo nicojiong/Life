@@ -1,16 +1,75 @@
 [
-  {"id": "drought",   "name": "旱",   "min_age": 8,  "weight": 3, "cooldown": 60},
-  {"id": "flood",     "name": "水",   "min_age": 8,  "weight": 3, "cooldown": 60},
-  {"id": "levy",      "name": "加赋", "min_age": 12, "weight": 4, "cooldown": 24},
-  {"id": "thieves",   "name": "盗",   "min_age": 12, "weight": 2, "cooldown": 36},
-  {"id": "plague",    "name": "疫",   "min_age": 10, "weight": 1, "cooldown": 120},
-  {"id": "suit",      "name": "讼",   "min_age": 16, "weight": 3, "cooldown": 24},
-  {"id": "wedding",   "name": "婚嫁", "min_age": 10, "weight": 3, "cooldown": 36},
-  {"id": "harvest",   "name": "丰年", "min_age": 16, "cond": "farm",   "weight": 4, "cooldown": 12},
-  {"id": "reward",    "name": "旌表", "min_age": 20, "cond": "famous", "weight": 2, "cooldown": 36},
-  {"id": "school",    "name": "入学", "min_age": 25, "cond": "parent", "weight": 2, "cooldown": 60},
-  {"id": "rash",      "name": "疹",   "min_age": 1,  "max_age": 6, "weight": 2, "cooldown": 12},
-  {"id": "riverfall", "name": "落水", "min_age": 2,  "max_age": 7, "weight": 2, "cooldown": 12},
-  {"id": "find_coin", "name": "拾钱", "min_age": 3,  "max_age": 8, "weight": 2, "cooldown": 12},
-  {"id": "quarrel",   "name": "口角", "min_age": 3,  "max_age": 9, "weight": 2, "cooldown": 12}
+  {
+    "id": "drought", "name": "旱", "min_age": 8, "weight": 3, "cooldown": 60,
+    "text": "春旱，河断了流。粮价涨了三成，家里先紧着吃。",
+    "effects": {"money": -700, "health": -3}
+  },
+  {
+    "id": "flood", "name": "水", "min_age": 8, "weight": 3, "cooldown": 60,
+    "text": "夏水暴涨，冲了低处的田。修堤又摊了一笔钱。",
+    "effects": {"money": -900}
+  },
+  {
+    "id": "levy", "name": "加赋", "min_age": 12, "weight": 4, "cooldown": 24,
+    "text": "官府加派杂税，里正挨家收钱。",
+    "effects": {"money": -500, "fame": -1}
+  },
+  {
+    "id": "thieves", "name": "盗", "min_age": 12, "weight": 2, "cooldown": 36,
+    "text": "夜里进了贼，翻走了箱底的现钱。",
+    "effects": {"money": -600, "health": -2}
+  },
+  {
+    "id": "plague", "name": "疫", "min_age": 10, "weight": 1, "cooldown": 120,
+    "text": "疫气进了村。"
+  },
+  {
+    "id": "suit", "name": "讼", "min_age": 16, "weight": 3, "cooldown": 24,
+    "text": "被人告了一状，赔钱不说，还落了个不是。",
+    "effects": {"money": -800, "fame": -2}
+  },
+  {
+    "id": "wedding", "name": "婚嫁", "min_age": 10, "weight": 3, "cooldown": 36,
+    "text": "邻家嫁女，随了三百文的礼。席上吃了两碗。",
+    "effects": {"money": -300, "fame": 3}
+  },
+  {
+    "id": "harvest", "name": "丰年", "min_age": 16, "cond": "farm", "weight": 4, "cooldown": 12,
+    "text": "今年风调雨顺。"
+  },
+  {
+    "id": "reward", "name": "旌表", "min_age": 20, "cond": "famous", "weight": 2, "cooldown": 36,
+    "text": "县里旌表善行，赏了一千二百文。",
+    "effects": {"money": 1200, "fame": 8}
+  },
+  {
+    "id": "school", "name": "入学", "min_age": 25, "cond": "parent", "weight": 2, "cooldown": 60,
+    "text": "孩子到了开蒙的年纪，束脩又是一笔。",
+    "effects": {"money": -500, "fame": 2}
+  },
+  {
+    "id": "rash", "name": "疹", "min_age": 1, "max_age": 6, "weight": 2, "cooldown": 12,
+    "text": "你出了一身疹子，母亲守了三夜，用凉水给你擦身。",
+    "effects": {"health": -3, "story": "出疹子"}
+  },
+  {
+    "id": "riverfall", "name": "落水", "min_age": 2, "max_age": 7, "weight": 2, "cooldown": 12,
+    "text": "你掉进河里，被撑船的捞了上来。母亲抱着你哭了很久。",
+    "effects": {"health": -2, "fame": 1, "story": "落水"}
+  },
+  {
+    "id": "find_coin", "name": "拾钱", "min_age": 3, "max_age": 8, "weight": 2, "cooldown": 12,
+    "text": "你在墙根下捡到一枚铜钱，攥了一天，最后还是交给了母亲。",
+    "effects": {"money": 50}
+  },
+  {
+    "id": "quarrel", "name": "口角", "min_age": 3, "max_age": 9, "weight": 2, "cooldown": 12,
+    "text": "你和邻家孩子打了一架，回来挨了骂。",
+    "effects": {"fame": -1, "health": -1}
+  },
+  {
+    "id": "temple_fair", "name": "庙会", "min_age": 4, "weight": 3, "cooldown": 18,
+    "text": "庙会上人挤人，你攥着母亲给的几文钱，买了一串糖葫芦。",
+    "effects": {"money": 30, "fame": 2}
+  }
 ]

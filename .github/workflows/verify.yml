@@ -30,7 +30,7 @@ jobs:
         run: |
           pwsh -NoProfile -File tools/verify.ps1 \
             -GodotPath /tmp/godot/Godot_v4.7.2-stable_linux.x86_64 \
-            -ExpectedAssertions 40 \
+            -ExpectedAssertions 41 \
             -ArtifactDir "$GITHUB_WORKSPACE/verify-artifacts"
 
       - name: Show verification log
