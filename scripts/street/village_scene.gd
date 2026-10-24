@@ -105,7 +105,7 @@ var women_rank := 0
 var month_frac := 0.0
 
 ## 存档格式版本：字段增删时递增，读档据此做迁移
-const SAVE_SCHEMA_VERSION := 10
+const SAVE_SCHEMA_VERSION := 11
 var save_schema_seen := 0
 ## 读到更高版本的存档后置位：拒绝加载、拒绝覆盖
 var save_future := false
@@ -174,16 +174,39 @@ func _arndi(a: int, b: int) -> int:
 ## M1-03b：事实日志。每条记"什么时候、什么类型、由什么引起"，供墓志与调试追溯
 var facts: Array = []
 const FACT_CAP := 240
+var fact_seq := 0
+## M2-03：最近一次年关结算 / 最近一次事件的事实 id，用于串因果链
+var last_boundary_fid := 0
+var last_event_fid := 0
 ## M1-01a：人物关系（id → attitude），由世界持有，不随场景重建消失
 var relations: Dictionary = {}
 ## 测试时关掉年度随机事件，避免随机扣血/扣钱干扰断言
 var events_enabled := true
 
 
-func _log_fact(kind: String, cause: String, data: Dictionary = {}) -> void:
-	facts.append({"t": _month_index(), "kind": kind, "cause": cause, "data": data})
+func _log_fact(kind: String, cause: String, data: Dictionary = {}, cause_fid: int = 0) -> int:
+	# M2-03：每条事实有自增 fid，并可选地指向造成它的上一条事实（cause_fid）
+	fact_seq += 1
+	facts.append({"fid": fact_seq, "t": _month_index(), "kind": kind, "cause": cause, "data": data, "cause_fid": cause_fid})
 	if facts.size() > FACT_CAP:
 		facts = facts.slice(facts.size() - FACT_CAP)
+	return fact_seq
+
+
+func _fact_chain(fid: int) -> Array:
+	# 从一条事实往回追，最多 16 层，防止脏数据造成死循环
+	var chain: Array = []
+	var cursor := fid
+	var by_fid := {}
+	for f in facts:
+		by_fid[int((f as Dictionary).get("fid", 0))] = f
+	while cursor != 0 and chain.size() < 16:
+		if not by_fid.has(cursor):
+			break
+		var cur: Dictionary = by_fid[cursor]
+		chain.append(cursor)
+		cursor = int(cur.get("cause_fid", 0))
+	return chain
 
 var _re_time := RegEx.new()
 
@@ -410,6 +433,7 @@ func _state_dict() -> Dictionary:
 		"action_cooldown": action_cooldown, "last_settled_year": last_settled_year,
 		"facts": facts, "relations": relations, "actor_vitals": actor_vitals,
 		"event_instances": event_instances, "event_seq": event_seq, "opp_last": opp_last,
+		"fact_seq": fact_seq, "last_event_fid": last_event_fid, "last_boundary_fid": last_boundary_fid,
 		# RNG 的 64 位 seed/state 用十进制字符串，避免 JSON 精度丢失
 		"sim_seed": str(sim_seed),
 		"sim_state": str(rng_world.state), "rng_actor_state": str(rng_actor.state),
@@ -595,6 +619,9 @@ func _load_game() -> bool:
 	event_seq = int(d.get("event_seq", 0))
 	if d.get("opp_last") is Dictionary:
 		opp_last = d["opp_last"]
+	fact_seq = int(d.get("fact_seq", 0))
+	last_event_fid = int(d.get("last_event_fid", 0))
+	last_boundary_fid = int(d.get("last_boundary_fid", 0))
 	if d.has("sim_seed") and d.has("sim_state"):
 		sim_seed = int(str(d["sim_seed"]))
 		rng_world.seed = sim_seed
@@ -1695,6 +1722,48 @@ func _run_verify_smoke() -> void:
 		print("[VERIFY] FAIL opportunity_cooldown fresh=", fresh_has_drought, " cold=", cold_has_drought, " warm=", warm_has_drought)
 	opp_last = {}
 	age = keep_opp_age
+
+	# M2-03：因果链——父亲死亡的事实能回到造成它的那条事件上
+	facts = []
+	fact_seq = 0
+	last_event_fid = 0
+	last_boundary_fid = 0
+	var keep_chain_age := age
+	age = 30
+	last_boundary_fid = _log_fact("year", "boundary", {"year": year})
+	event_instances = []
+	event_seq = 0
+	var chain_sid := _enqueue_event("plague", "opportunity", _month_index(), last_boundary_fid)
+	_drain_due_events()
+	var ev_fid_chain := last_event_fid
+	var death_fid_chain := _log_fact("death", "old_age", {"who": "father"}, ev_fid_chain)
+	var chain := _fact_chain(death_fid_chain)
+	var boundary_chain := _fact_chain(last_boundary_fid)
+	# 悬空引用检查：每条事实的 cause_fid 要么是 0，要么能在日志里找到
+	var known := {}
+	for f in facts:
+		known[int((f as Dictionary).get("fid", 0))] = true
+	var dangling := 0
+	for f in facts:
+		var cf := int((f as Dictionary).get("cause_fid", 0))
+		if cf != 0 and not known.has(cf):
+			dangling += 1
+	var chain_ok: bool = chain.size() == 3 and int(chain[0]) == death_fid_chain \
+		and int(chain[1]) == ev_fid_chain and int(chain[2]) == last_boundary_fid \
+		and boundary_chain.size() == 1 and dangling == 0 and chain_sid > 0
+	if chain_ok:
+		oks += 1
+		print("[VERIFY] PASS cause_chain_resolves ", chain, " boundary=", boundary_chain)
+	else:
+		fails.append("cause_chain_resolves")
+		print("[VERIFY] FAIL cause_chain_resolves chain=", chain, " boundary=", boundary_chain, " dangling=", dangling)
+	event_instances = []
+	event_seq = 0
+	facts = []
+	fact_seq = 0
+	last_event_fid = 0
+	last_boundary_fid = 0
+	age = keep_chain_age
 
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
@@ -3366,7 +3435,7 @@ func _parent_death() -> void:
 	# A03：用 alive/death_record 表示死亡，不再靠删除人物实体
 	parent_dead[who] = true
 	parent_death_year[who] = year
-	_log_fact("death", "old_age", {"who": who, "age": p_age})
+	_log_fact("death", "old_age", {"who": who, "age": p_age}, last_event_fid)
 	_switch_pov("child")
 	_spawn_npcs()
 	_refresh_pov_bar()
@@ -4796,6 +4865,7 @@ func _on_new_year() -> void:
 		elif story.has("读书") and learning >= 25.0:
 			_toast("今年开科，书院可以应解试。", Color(0.48, 0.32, 0.16))
 	boundary_log.append("settle")
+	last_boundary_fid = _log_fact("year", "boundary", {"year": year})
 	_roll_event()
 	boundary_log.append("events")
 	# 生子
@@ -4865,9 +4935,9 @@ var event_seq := 0
 var opp_last: Dictionary = {}
 
 
-func _enqueue_event(id: String, cause: String, due_month: int) -> int:
+func _enqueue_event(id: String, cause: String, due_month: int, cause_fid: int = 0) -> int:
 	event_seq += 1
-	event_instances.append({"sid": event_seq, "id": id, "cause": cause, "due": due_month, "fired": false})
+	event_instances.append({"sid": event_seq, "id": id, "cause": cause, "due": due_month, "fired": false, "cause_fid": cause_fid})
 	return event_seq
 
 
@@ -4881,7 +4951,10 @@ func _drain_due_events() -> int:
 		if int((inst as Dictionary).get("due", 0)) > now:
 			continue
 		inst["fired"] = true
-		_log_fact("event", str(inst.get("cause", "unknown")), {"id": str(inst["id"]), "sid": int(inst["sid"])})
+		var ev_fid := _log_fact("event", str(inst.get("cause", "unknown")),
+			{"id": str(inst["id"]), "sid": int(inst["sid"])}, int(inst.get("cause_fid", 0)))
+		last_event_fid = ev_fid
+		inst["fid"] = ev_fid
 		_apply_event(str(inst["id"]))
 		fired += 1
 	var alive_list: Array = []
@@ -4935,7 +5008,7 @@ func _roll_event() -> void:
 		return
 	var eid := str(ev["id"])
 	opp_last[eid] = _month_index()
-	_enqueue_event(eid, "opportunity", _month_index() + _rndi(0, 2))
+	_enqueue_event(eid, "opportunity", _month_index() + _rndi(0, 2), last_boundary_fid)
 	_drain_due_events()
 
 

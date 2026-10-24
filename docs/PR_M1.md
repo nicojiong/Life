@@ -1,4 +1,4 @@
-# PR：M0 收尾 + M1 可靠性底座（汇总）
+﻿# PR：M0 收尾 + M1 可靠性底座（汇总）
 
 > 本文件是 PR 描述草稿。分支 `agent/M1-ci-workflow` 是**一条连续提交链**，已包含此前
 > 16 个开发分支的全部提交，无需逐个合并。
@@ -25,8 +25,8 @@
 
 ## 测试证据
 
-- 本地：`tools/verify.ps1` → `pass=27 fail=0`，exit 0，真实存档目录未被触碰。
-- CI：GitHub Actions run **40052529712**（SHA `e0a06eb`）全部步骤 success；此前 `e893052` 的 run `40051930378` 也 success。
+- 本地：`tools/verify.ps1` → `pass=35 fail=0`，exit 0，真实存档目录未被触碰。
+- CI：GitHub Actions run 见 commit 状态页（最新 `35` 条断言）全部步骤 success；此前 `e893052` 的 run `40051930378` 也 success。
 - 日志产物：`verify-artifacts`（run.log）。
 
 历史失败（已在本次修掉）：

@@ -336,10 +336,10 @@
                                          "每链有接受、拒绝、缺资源和演员失效路径",
                                          "所有长期后果跨存档与年份保持正确"
                                      ],
-                      "status":  "todo",
+                      "status":  "in_progress",
                       "owner":  null,
                       "evidence":  [
-
+                                       "docs/verification/M2-03a.md"
                                    ],
                       "commit_sha":  null,
                       "remote_sha":  null,
