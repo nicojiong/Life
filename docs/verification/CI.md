@@ -52,3 +52,17 @@ Godot 在 Linux 上把 `user://` 放在 `~/.local/share/godot/app_userdata/<项�
 - 只在 ubuntu-latest 上跑，Windows/macOS 的 CI 未配置。
 - 没有缓存 Godot 下载，每次运行都要重新拉取。
 - Actions 版本仍是 `checkout@v4` / `upload-artifact@v4`，GitHub 已提示 Node 20 弃用（当前只是警告，未影响结果）。
+
+
+## 6. 读 CI 结果的三种方式（含限流后的替代）
+
+| 方式 | 用途 | 限制 |
+|---|---|---|
+| `api.github.com/repos/{repo}/actions/runs` | 按 SHA 精确查、看步骤 | 未认证 60 次/小时，轮询容易打满 |
+| `api.github.com/repos/{repo}/check-runs/{job_id}/annotations` | 读失败原因的注解 | 同样计入限流 |
+| `github.com/{repo}/commit/{sha}/checks`（HTML） | 限流后确认某次提交是否通过 | 需解析 HTML，不是结构化数据 |
+| `github.com/{repo}/actions/workflows/verify.yml/badge.svg?branch=X` | 分支最新一次的状态 | 只反映最新一次，不能按 SHA 定位 |
+
+本轮实测：连续轮询把未认证配额打满（`API rate limit exceeded`），随后改用
+`commit/{sha}/checks` 页面确认——页面里出现 `color-bg-success-emphasis` 与 `data-conclusion="success"`，
+即该 SHA 的 isolated-smoke 通过。

@@ -14,10 +14,10 @@
     "task_status":  "M1-01b-pushed",
     "branch":  "16 个 agent/* 堆叠分支（见 docs/DELIVERY_M1.md）",
     "base_sha":  "bf0846f1c20cbcf4dd0cf5f5707b0cf1c88e12cb",
-    "commit_sha":  "bf0fe68f064121d5f410ad4a9df7444933063166",
-    "remote_sha":  "bf0fe68f064121d5f410ad4a9df7444933063166",
+    "commit_sha":  "4466c07634746641983a8522d06997e3b5e61d03",
+    "remote_sha":  "4466c07634746641983a8522d06997e3b5e61d03",
     "pr_url":  null,
-    "ci_status":  "green (run 40052887591 @ bf0fe68)",
+    "ci_status":  "green (commit 4466c07 checks page; API 限流后改用 HTML 确认)",
     "integrated_sha":  null,
     "blocked_reason":  "PR 创建被阻塞：本机无 gh CLI、无 GITHUB_TOKEN；分支已 push 且 CI 通过",
     "evidence":  [
