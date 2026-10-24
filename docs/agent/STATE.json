@@ -9,20 +9,21 @@
     "godot_run":  "import_only",
     "game_code_modified":  false,
     "remote_mutations_performed":  true,
-    "current_task":  "M2-05 / M1 正确性收敛",
-    "next_task":  "M1-04",
-    "task_status":  "phase1-partial",
-    "branch":  "16 个 agent/* 堆叠分支（见 docs/DELIVERY_M1.md）",
+    "current_task":  "M2-01b 事件实例绑定承受者",
+    "next_task":  "M2-01b 事件实例绑定承受者",
+    "task_status":  "pr-open-draft",
+    "branch":  "agent/M1-ci-workflow",
     "base_sha":  "bf0846f1c20cbcf4dd0cf5f5707b0cf1c88e12cb",
     "commit_sha":  "b566a35252a50a240b02000e1e32caff1933fb46",
     "remote_sha":  "b566a35252a50a240b02000e1e32caff1933fb46",
-    "pr_url":  null,
+    "pr_url":  "https://github.com/nicojiong/Life/pull/1",
     "ci_status":  "green (commit b566a35 checks page)",
     "integrated_sha":  null,
-    "blocked_reason":  "PR 创建仍被阻塞：本机无 gh CLI、无 token；分支已 push、CI 绿",
+    "blocked_reason":  "仍有限制：只有 Linux CI；数据文件无 schema 校验；无真人试玩。PR 已存在（#1, Draft），不再阻塞。",
     "evidence":  [
-                     "docs/BASELINE.md",
-                     "docs/tasks/M0-01.md"
+                     "docs/verification/2026-10-24-fixes-1.md",
+                     "docs/verification/2026-10-24-fixes-2.md",
+                     "docs/verification/M2-05b.md"
                  ],
-    "next_step":  "事件实例绑定稳定人物 ID 与死亡后策略；随后连续运行/重载对比与借米因果链"
+    "next_step":  "事件实例绑定稳定人物 ID 与死亡后策略（取消/转移），补四条回归"
 }
