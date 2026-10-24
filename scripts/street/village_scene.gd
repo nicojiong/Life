@@ -105,7 +105,7 @@ var women_rank := 0
 var month_frac := 0.0
 
 ## 存档格式版本：字段增删时递增，读档据此做迁移
-const SAVE_SCHEMA_VERSION := 11
+const SAVE_SCHEMA_VERSION := 12
 var save_schema_seen := 0
 ## 读到更高版本的存档后置位：拒绝加载、拒绝覆盖
 var save_future := false
@@ -175,6 +175,8 @@ func _arndi(a: int, b: int) -> int:
 var facts: Array = []
 const FACT_CAP := 240
 var fact_seq := 0
+## 已被裁剪掉的最大事实 id；比它小的引用算已归档
+var fact_floor := 0
 ## M2-03：最近一次年关结算 / 最近一次事件的事实 id，用于串因果链
 var last_boundary_fid := 0
 var last_event_fid := 0
@@ -188,8 +190,10 @@ func _log_fact(kind: String, cause: String, data: Dictionary = {}, cause_fid: in
 	# M2-03：每条事实有自增 fid，并可选地指向造成它的上一条事实（cause_fid）
 	fact_seq += 1
 	facts.append({"fid": fact_seq, "t": _month_index(), "kind": kind, "cause": cause, "data": data, "cause_fid": cause_fid})
-	if facts.size() > FACT_CAP:
-		facts = facts.slice(facts.size() - FACT_CAP)
+	# 裁剪时记下被丢掉的最大 fid，这样旧引用是"已归档"而不是"悬空"
+	while facts.size() > FACT_CAP:
+		var dropped: Dictionary = facts.pop_front()
+		fact_floor = maxi(fact_floor, int(dropped.get("fid", 0)))
 	return fact_seq
 
 
@@ -200,7 +204,7 @@ func _fact_chain(fid: int) -> Array:
 	var by_fid := {}
 	for f in facts:
 		by_fid[int((f as Dictionary).get("fid", 0))] = f
-	while cursor != 0 and chain.size() < 16:
+	while cursor > fact_floor and chain.size() < 16:
 		if not by_fid.has(cursor):
 			break
 		var cur: Dictionary = by_fid[cursor]
@@ -433,7 +437,7 @@ func _state_dict() -> Dictionary:
 		"action_cooldown": action_cooldown, "last_settled_year": last_settled_year,
 		"facts": facts, "relations": relations, "actor_vitals": actor_vitals,
 		"event_instances": event_instances, "event_seq": event_seq, "opp_last": opp_last,
-		"fact_seq": fact_seq, "last_event_fid": last_event_fid, "last_boundary_fid": last_boundary_fid,
+		"fact_seq": fact_seq, "fact_floor": fact_floor, "last_event_fid": last_event_fid, "last_boundary_fid": last_boundary_fid,
 		# RNG 的 64 位 seed/state 用十进制字符串，避免 JSON 精度丢失
 		"sim_seed": str(sim_seed),
 		"sim_state": str(rng_world.state), "rng_actor_state": str(rng_actor.state),
@@ -620,6 +624,7 @@ func _load_game() -> bool:
 	if d.get("opp_last") is Dictionary:
 		opp_last = d["opp_last"]
 	fact_seq = int(d.get("fact_seq", 0))
+	fact_floor = int(d.get("fact_floor", 0))
 	last_event_fid = int(d.get("last_event_fid", 0))
 	last_boundary_fid = int(d.get("last_boundary_fid", 0))
 	if d.has("sim_seed") and d.has("sim_state"):
@@ -1902,6 +1907,33 @@ func _run_verify_smoke() -> void:
 	else:
 		fails.append("life_slice_0_18")
 		print("[VERIFY] FAIL life_slice_0_18 ", slice)
+
+	# M2-06：事实裁剪后旧引用应被判为「已归档」，而不是「悬空」
+	var keep_floor_facts: Array = (facts as Array).duplicate(true)
+	var keep_floor := fact_floor
+	var keep_seq := fact_seq
+	facts = []
+	fact_floor = 0
+	fact_seq = 0
+	var first_fid := _log_fact("test", "fill")
+	for i in range(FACT_CAP + 5):
+		_log_fact("test", "fill")
+	var dropped_count := fact_seq - facts.size()
+	var oldest_left := int((facts[0] as Dictionary).get("fid", 0))
+	var chain_old := _fact_chain(first_fid)
+	var chain_new := _fact_chain(fact_seq)
+	var trim_ok: bool = facts.size() == FACT_CAP and dropped_count == 6 \
+		and fact_floor == 6 and oldest_left == 7 and chain_old.is_empty() \
+		and chain_new.size() >= 1 and int(chain_new[0]) == fact_seq
+	if trim_ok:
+		oks += 1
+		print("[VERIFY] PASS fact_trim_archive floor=", fact_floor, " kept=", facts.size(), " oldest=", oldest_left)
+	else:
+		fails.append("fact_trim_archive")
+		print("[VERIFY] FAIL fact_trim_archive dropped=", dropped_count, " floor=", fact_floor, " kept=", facts.size(), " oldest=", oldest_left)
+	facts = keep_floor_facts
+	fact_floor = keep_floor
+	fact_seq = keep_seq
 
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
