@@ -27,7 +27,11 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $runId = [guid]::NewGuid().ToString("N").Substring(0, 8)
 $tempRoot = Join-Path $env:TEMP "life-cont-$runId"
-$artifacts = Join-Path $root $ArtifactDir
+if ([System.IO.Path]::IsPathRooted($ArtifactDir)) {
+  $artifacts = $ArtifactDir
+} else {
+  $artifacts = Join-Path $root $ArtifactDir
+}
 
 function Write-Step([string]$msg) { Write-Host "[cont] $msg" }
 
