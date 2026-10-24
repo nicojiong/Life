@@ -105,7 +105,7 @@ var women_rank := 0
 var month_frac := 0.0
 
 ## 存档格式版本：字段增删时递增，读档据此做迁移
-const SAVE_SCHEMA_VERSION := 7
+const SAVE_SCHEMA_VERSION := 8
 var save_schema_seen := 0
 ## 读到更高版本的存档后置位：拒绝加载、拒绝覆盖
 var save_future := false
@@ -119,6 +119,20 @@ var action_cooldown := {}
 var last_settled_year := 0
 ## M1-05b：一年里各阶段的执行顺序，供断言与调试检查
 var boundary_log: Array = []
+## M1-01b：三个人的年龄/健康/寿数只存一份。当前操控者的真值是全局字段，
+## 其余人在 actor_vitals；pov_state 只留职业与 story。
+var actor_vitals: Dictionary = {}
+
+
+func _vitals_of(who: String) -> Dictionary:
+	if who == pov:
+		return {"age": age, "health": health, "lifespan": lifespan}
+	var v: Dictionary = actor_vitals.get(who, {})
+	return {"age": int(v.get("age", 0)), "health": float(v.get("health", 100.0)), "lifespan": int(v.get("lifespan", 100))}
+
+
+func _store_active_vitals() -> void:
+	actor_vitals[pov] = {"age": age, "health": health, "lifespan": lifespan}
 
 ## M1-03：模拟专用随机流（与画面/游走的随机分开），可存可复现
 ## M1-03d：三条可保存的模拟流（出生 / 世界 / 人物决策）
@@ -175,7 +189,7 @@ var _re_time := RegEx.new()
 
 ## 切换视角时要保存/恢复的字段（钱是全家共用的，不在其中）
 const POV_FIELDS := [
-	"age", "health", "learning", "craft", "fame", "lifespan",
+	"learning", "craft", "fame",
 	"craft_rank", "trade_rank", "med_rank", "farm_rank", "mil_rank",
 	"office_rank", "gov_merit", "scandal", "county",
 	"land", "workshop_open", "guild_open", "apprentice_hired", "med_book",
@@ -393,7 +407,7 @@ func _state_dict() -> Dictionary:
 		"time_scale": time_scale, "slot": slot,
 		"parent_dead": parent_dead, "parent_death_year": parent_death_year,
 		"action_cooldown": action_cooldown, "last_settled_year": last_settled_year,
-		"facts": facts, "relations": relations,
+		"facts": facts, "relations": relations, "actor_vitals": actor_vitals,
 		# RNG 的 64 位 seed/state 用十进制字符串，避免 JSON 精度丢失
 		"sim_seed": str(sim_seed),
 		"sim_state": str(rng_world.state), "rng_actor_state": str(rng_actor.state),
@@ -565,6 +579,15 @@ func _load_game() -> bool:
 		facts = d["facts"]
 	if d.get("relations") is Dictionary:
 		relations = d["relations"]
+	if d.get("actor_vitals") is Dictionary:
+		actor_vitals = d["actor_vitals"]
+	else:
+		# 旧档：从 pov_state 的旧字段迁移出生命值
+		actor_vitals = {}
+		for k in pov_state.keys():
+			var ps2: Dictionary = pov_state[k]
+			actor_vitals[str(k)] = {"age": int(ps2.get("age", 0)), "health": float(ps2.get("health", 100.0)), "lifespan": int(ps2.get("lifespan", 100))}
+		actor_vitals["child"] = {"age": age, "health": health, "lifespan": lifespan}
 	if d.has("sim_seed") and d.has("sim_state"):
 		sim_seed = int(str(d["sim_seed"]))
 		rng_world.seed = sim_seed
@@ -822,7 +845,7 @@ func _replay_snapshot() -> Dictionary:
 		"relations": (relations as Dictionary).duplicate(true),
 		"cooldown": (action_cooldown as Dictionary).duplicate(true),
 		"facts": (facts as Array).duplicate(true),
-		"pov_state": (pov_state as Dictionary).duplicate(true),
+		"pov_state": (pov_state as Dictionary).duplicate(true), "actor_vitals": (actor_vitals as Dictionary).duplicate(true),
 		"parent_dead": (parent_dead as Dictionary).duplicate(true),
 		"parent_death_year": (parent_death_year as Dictionary).duplicate(true),
 		"last_settled_year": last_settled_year,
@@ -859,6 +882,7 @@ func _replay_restore(snap: Dictionary) -> void:
 	action_cooldown = (snap["cooldown"] as Dictionary).duplicate(true)
 	facts = (snap["facts"] as Array).duplicate(true)
 	pov_state = (snap["pov_state"] as Dictionary).duplicate(true)
+	actor_vitals = (snap["actor_vitals"] as Dictionary).duplicate(true)
 	parent_dead = (snap["parent_dead"] as Dictionary).duplicate(true)
 	parent_death_year = (snap["parent_death_year"] as Dictionary).duplicate(true)
 	last_settled_year = int(snap["last_settled_year"])
@@ -1162,11 +1186,10 @@ func _run_verify_smoke() -> void:
 	var keep_father: Dictionary = (pov_state.get("father", {}) as Dictionary).duplicate(true)
 	var keep_settled2 := last_settled_year
 	var keep_hp2 := health
-	var f_state: Dictionary = pov_state.get("father", {})
-	f_state["age"] = 55
-	f_state["health"] = 40.0
-	f_state["lifespan"] = 90
-	pov_state["father"] = f_state
+	var keep_fa: Dictionary = (actor_vitals.get("father", {}) as Dictionary).duplicate(true)
+	actor_vitals["father"] = {"age": 55, "health": 40.0, "lifespan": 90}
+	var f_state: Dictionary = actor_vitals["father"]
+	actor_vitals["father"] = f_state
 	health = 60.0
 	last_settled_year = year - 1
 	var keep_money3 := money
@@ -1175,14 +1198,14 @@ func _run_verify_smoke() -> void:
 	money = 50000  # 保证年关付得起，不触发"欠年"扣血
 	_on_new_year()
 	events_enabled = keep_events
-	var father_hp := float((pov_state.get("father", {}) as Dictionary).get("health", 0.0))
+	var father_hp := float(_vitals_of("father")["health"])
 	if is_equal_approx(father_hp, 39.2) and is_equal_approx(health, 60.0):
 		oks += 1
 		print("[VERIFY] PASS actors_age_independently father_hp=", father_hp, " self_hp=", health)
 	else:
 		fails.append("actors_age_independently")
 		print("[VERIFY] FAIL actors_age_independently father_hp=", father_hp, " self_hp=", health)
-	pov_state["father"] = keep_father
+	actor_vitals["father"] = keep_fa
 	last_settled_year = keep_settled2
 	health = keep_hp2
 	money = keep_money3
@@ -1417,7 +1440,7 @@ func _run_verify_smoke() -> void:
 		st5["lifespan"] = 99
 		if int(st5.get("age", 0)) > 60:
 			st5["age"] = 40
-		pov_state[k5] = st5
+		actor_vitals[k5] = st5
 	age = 10
 	money = 50000
 	last_settled_year = year - 1
@@ -1497,6 +1520,28 @@ func _run_verify_smoke() -> void:
 	last_settled_year = keep_settled6
 	events_enabled = keep_events6
 	age = keep_age6
+
+	# M1-01b：三个人的年龄/健康/寿数各存一份，换视角来回切不丢
+	if pov != "child":
+		_switch_pov("child")
+	# 孩子此刻的真值就是全局字段，先记下来再改父母
+	var child_v: Dictionary = _vitals_of("child").duplicate(true)
+	actor_vitals["father"] = {"age": 44, "health": 66.0, "lifespan": 70}
+	actor_vitals["mother"] = {"age": 41, "health": 58.0, "lifespan": 72}
+	_switch_pov("father")
+	var f_ok: bool = age == 44 and is_equal_approx(health, 66.0) and lifespan == 70
+	_switch_pov("mother")
+	var m_ok: bool = age == 41 and is_equal_approx(health, 58.0) and lifespan == 72
+	_switch_pov("child")
+	var c_ok: bool = age == int(child_v["age"]) and is_equal_approx(health, float(child_v["health"])) \
+			and lifespan == int(child_v["lifespan"])
+	var f_back: Dictionary = _vitals_of("father")
+	if f_ok and m_ok and c_ok and int(f_back["age"]) == 44:
+		oks += 1
+		print("[VERIFY] PASS actor_vitals_roundtrip father=", f_back)
+	else:
+		fails.append("actor_vitals_roundtrip")
+		print("[VERIFY] FAIL actor_vitals_roundtrip f=", f_ok, " m=", m_ok, " c=", c_ok, " back=", f_back)
 
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
@@ -1873,6 +1918,16 @@ func _init_identity() -> void:
 	mother_temper = str(temps[r.randi_range(0, temps.size() - 1)])
 	pov_state["father"] = _make_parent("father", r)
 	pov_state["mother"] = _make_parent("mother", r)
+	# M1-01b：生命值建立 actor 表，pov_state 只留职业与 story
+	actor_vitals = {}
+	for k in pov_state.keys():
+		var ps: Dictionary = pov_state[k]
+		actor_vitals[str(k)] = {
+			"age": int(ps.get("age", 0)),
+			"health": float(ps.get("health", 100.0)),
+			"lifespan": int(ps.get("lifespan", 100)),
+		}
+	actor_vitals["child"] = {"age": age, "health": health, "lifespan": lifespan}
 	child_pos = player
 	# 体格：兵的壮、吏的瘦、农与匠的厚实
 	if origin_flags.has("军户"):
@@ -1984,6 +2039,8 @@ func _father_trade_word() -> String:
 
 
 func _capture_pov() -> Dictionary:
+	# M1-01b：生命值写进 actor_vitals，pov_state 只带职业与 story
+	_store_active_vitals()
 	var d := {}
 	for k in POV_FIELDS:
 		d[k] = get(k)
@@ -1996,6 +2053,13 @@ func _apply_pov(d: Dictionary) -> void:
 		if d.has(k):
 			set(k, d[k])
 	story = (d.get("story", {}) as Dictionary).duplicate(true)
+	# 生命值从 actor_vitals 取；注意此时 pov 已切换，不能用 _vitals_of（它会读全局字段）
+	var v: Dictionary = actor_vitals.get(pov, {})
+	if v.is_empty():
+		return
+	age = int(v.get("age", age))
+	health = float(v.get("health", health))
+	lifespan = int(v.get("lifespan", lifespan))
 
 
 func _pov_npc_id() -> String:
@@ -2015,6 +2079,9 @@ func _switch_pov(who: String) -> void:
 	pov = who
 	if not target.is_empty():
 		_apply_pov(target)
+	else:
+		# 没有存过这个人的职业快照（例如一直没切走过），但生命值仍要从 actor_vitals 恢复
+		_apply_pov({})
 	if who == "child":
 		player = child_pos
 	else:
@@ -2840,7 +2907,7 @@ func _spawn_npcs() -> void:
 			entry["line_child"] = str(cc["line_child"])
 		npcs.append(entry)
 	if pov != "child":
-		var kid_age := int((pov_state.get("child", {}) as Dictionary).get("age", 0))
+		var kid_age := int(_vitals_of("child")["age"])
 		var kp := child_pos
 		npcs.append({
 			"id": "child", "name": name_text, "named": true,
@@ -3141,7 +3208,7 @@ func _parent_death() -> void:
 		return
 	var nm := father_name if who == "father" else mother_name
 	var p_age := age
-	var kid_age := int((pov_state.get("child", {}) as Dictionary).get("age", 0))
+	var kid_age := int(_vitals_of("child")["age"])
 	parents_alive = maxi(0, parents_alive - 1)
 	# A03：用 alive/death_record 表示死亡，不再靠删除人物实体
 	parent_dead[who] = true
@@ -4406,10 +4473,12 @@ func _advance_months(n: int) -> void:
 			month = 1
 			year += 1
 			age += 1
-			# 所有人一起长一岁——你替父亲过日子的时候，孩子也在长大
-			for k in pov_state.keys():
-				var st: Dictionary = pov_state[k]
-				st["age"] = int(st.get("age", age)) + 1
+			# 所有人一起长一岁：当前操控者在全局字段上，其余人在 actor_vitals 上
+			for k in actor_vitals.keys():
+				if str(k) == pov:
+					continue
+				var av: Dictionary = actor_vitals[k]
+				av["age"] = int(av.get("age", 0)) + 1
 			_on_new_year()
 			if age >= lifespan or health <= 0.0:
 				_trigger_actor_end()
@@ -4421,13 +4490,13 @@ func _household_year_cost() -> int:
 	var total := 0
 	var members: Array = []
 	members.append({"age": age})
-	for k in pov_state.keys():
+	for k in actor_vitals.keys():
 		var key := str(k)
-		if key != "father" and key != "mother" and key != "child":
+		if key == pov:
 			continue
 		if bool(parent_dead.get(key, false)):
 			continue
-		members.append(pov_state[k])
+		members.append(actor_vitals[key])
 	for m in members:
 		total += 150 + int((m as Dictionary).get("age", 0)) * 2
 	if married:
@@ -4457,13 +4526,16 @@ func _on_new_year() -> void:
 	scenes_done.clear()
 	# M1-02c：每个活着的人各自老化扣血，不因当前操控谁而改变
 	health = _decay_health(age, health)
-	for k in pov_state.keys():
-		var st: Dictionary = pov_state[k]
+	for k in actor_vitals.keys():
+		var kid := str(k)
+		if kid == pov:
+			actor_vitals[kid] = {"age": age, "health": health, "lifespan": lifespan}
+			continue
+		var st: Dictionary = actor_vitals[kid]
 		var st_age := int(st.get("age", 0))
 		var st_hp := _decay_health(st_age, float(st.get("health", 100.0)))
 		st["health"] = st_hp
 		var st_life := int(st.get("lifespan", 100))
-		var kid := str(k)
 		if kid in ["father", "mother"] and not bool(parent_dead.get(kid, false)) \
 				and (st_age >= st_life or st_hp <= 0.0):
 			parent_dead[kid] = true
