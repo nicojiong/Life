@@ -117,6 +117,8 @@ var recovered_from_backup := false
 var action_cooldown := {}
 ## M1-02b：年关结算水位，保证一年只结算一次
 var last_settled_year := 0
+## M1-05b：一年里各阶段的执行顺序，供断言与调试检查
+var boundary_log: Array = []
 
 ## M1-03：模拟专用随机流（与画面/游走的随机分开），可存可复现
 ## M1-03d：三条可保存的模拟流（出生 / 世界 / 人物决策）
@@ -1449,6 +1451,52 @@ func _run_verify_smoke() -> void:
 	else:
 		fails.append("golden_replay")
 		print("[VERIFY] FAIL golden_replay a=", digest_a, " b=", digest_b, " other_seed=", digest_c)
+
+	# M1-05b：一年里的阶段顺序固定为 老化 → 结算 → 事件；死者不再经历结算
+	var keep_settled6 := last_settled_year
+	var keep_events6 := events_enabled
+	events_enabled = false
+	last_settled_year = year - 1
+	var keep_age6 := age
+	age = 30
+	_on_new_year()
+	var order_ok := boundary_log.size() >= 3 and str(boundary_log[0]) == "aging" \
+		and boundary_log.has("settle") and boundary_log.has("events") \
+		and boundary_log.find("settle") < boundary_log.find("events")
+	if order_ok:
+		oks += 1
+		print("[VERIFY] PASS year_boundary_order ", boundary_log)
+	else:
+		fails.append("year_boundary_order")
+		print("[VERIFY] FAIL year_boundary_order ", boundary_log)
+
+	# 同 tick 内死亡先于结算：死了就不再扣年关、不再发生事件
+	var keep_money6 := money
+	var keep_age7 := age
+	var keep_hp6 := health
+	var keep_life6 := lifespan
+	age = 50
+	health = 0.5
+	lifespan = 90
+	money = 10000
+	last_settled_year = year - 1
+	_on_new_year()
+	var death_first: bool = boundary_log == ["aging", "death_active"] and money == 10000 and ended
+	if death_first:
+		oks += 1
+		print("[VERIFY] PASS death_before_settle ", boundary_log, " money=", money)
+	else:
+		fails.append("death_before_settle")
+		print("[VERIFY] FAIL death_before_settle ", boundary_log, " money=", money, " ended=", ended)
+	ended = false
+	busy = false
+	money = keep_money6
+	age = keep_age7
+	health = keep_hp6
+	lifespan = keep_life6
+	last_settled_year = keep_settled6
+	events_enabled = keep_events6
+	age = keep_age6
 
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
@@ -4405,6 +4453,7 @@ func _on_new_year() -> void:
 		print("[YEAR] settle_skipped year=", year, " last=", last_settled_year)
 		return
 	last_settled_year = year
+	boundary_log = ["aging"]
 	scenes_done.clear()
 	# M1-02c：每个活着的人各自老化扣血，不因当前操控谁而改变
 	health = _decay_health(age, health)
@@ -4419,6 +4468,8 @@ func _on_new_year() -> void:
 				and (st_age >= st_life or st_hp <= 0.0):
 			parent_dead[kid] = true
 			parent_death_year[kid] = year
+			if not boundary_log.has("death"):
+				boundary_log.append("death")
 			parents_alive = maxi(0, parents_alive - 1)
 			_toast("%s也走了，就在这一年。" % (father_name if kid == "father" else mother_name),
 				Color(0.62, 0.24, 0.18))
@@ -4468,6 +4519,12 @@ func _on_new_year() -> void:
 			"父亲把刀递给你，又收了回去——那是他当兵时留下的。",
 			"从此以后，这个家要你自己撑了。",
 		], false)
+	# M1-05b：死亡判定先于本年的一切结算与收益（同 tick 里死者不再经历这一年）
+	if age >= lifespan or health <= 0.0:
+		boundary_log.append("death_active")
+		_trigger_actor_end()
+		return
+
 	# 年关：吃穿用度与赋税（按户结算，见 _household_year_cost）
 	if age >= 8:
 		var cost := _household_year_cost()
@@ -4513,7 +4570,9 @@ func _on_new_year() -> void:
 			_toast("今年开科，可赴京应省试。", Color(0.48, 0.32, 0.16))
 		elif story.has("读书") and learning >= 25.0:
 			_toast("今年开科，书院可以应解试。", Color(0.48, 0.32, 0.16))
+	boundary_log.append("settle")
 	_roll_event()
+	boundary_log.append("events")
 	# 生子
 	if age == 30 and married and children == 0 and not milestones.has("child1"):
 		milestones["child1"] = true
