@@ -367,7 +367,7 @@
                       "status":  "in_progress",
                       "owner":  null,
                       "evidence":  [
-                                       "docs/verification/M2-04a.md"
+                                       "docs/verification/M2-04a-autonomy.md"
                                    ],
                       "commit_sha":  null,
                       "remote_sha":  null,

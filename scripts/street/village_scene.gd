@@ -106,7 +106,7 @@ var month_frac := 0.0
 
 ## 存档格式版本：字段增删时递增，读档据此做迁移
 const ContentSchema := preload("res://scripts/core/content_schema.gd")
-const SAVE_SCHEMA_VERSION := 17
+const SAVE_SCHEMA_VERSION := 18
 var save_schema_seen := 0
 ## 读到更高版本的存档后置位：拒绝加载、拒绝覆盖
 var save_future := false
@@ -283,6 +283,7 @@ const YEAR_SCENES := [
 {"m": 9, "id": "debt_month", "name": "还米", "cond": "debt"},
 	{"m": 2, "id": "bing", "name": "卧病", "cond": "ill"},
 	{"m": 4, "id": "bai_shi", "name": "拜师", "cond": "apprentice"},
+	{"m": 3, "id": "kai_meng", "name": "开蒙", "cond": "preference"},
 ]
 var scenes_done := {}
 
@@ -295,6 +296,16 @@ const SCENE_OPTS := {
 		 "text": "你只肯借一斗。孙四笑了笑，说少借点也好。"},
 		{"id": "refuse", "label": "咬牙不借", "gain": {"fame": 1},
 		 "text": "你把裤腰带又紧了一扣，没去敲孙四的门。"},
+	],
+	"kai_meng": [
+		{"id": "study", "label": "想读书", "gain": {},
+		 "text": "你趴在私塾窗外听了一下午，回来跟家里说想读书。"},
+		{"id": "craft", "label": "想学手艺", "gain": {},
+		 "text": "你在陈师傅的作坊门口蹲了半天，看刨花一卷一卷落下来。"},
+		{"id": "farm", "label": "想在家帮忙", "gain": {},
+		 "text": "你说地里的活儿你也能干。母亲摸了摸你的头。"},
+		{"id": "rebel", "label": "不想听家里的", "gain": {},
+		 "text": "你说你不想按他们说的活。父亲把烟袋在桌上磕了磕。"},
 	],
 	"bai_shi": [
 		{"id": "pay", "label": "备二百钱上门", "gain": {},
@@ -460,6 +471,7 @@ func _state_dict() -> Dictionary:
 		"women_rank": women_rank, "scenes_done": scenes_done, "child_last": child_last,
 		"time_scale": time_scale, "slot": slot, "month_frac": month_frac,
 	"boundary_log": boundary_log.duplicate(true), "player_build": (player_build as Dictionary).duplicate(true),
+	"child_pref": child_pref,
 	"apprentice_state": apprentice_state, "master_available": master_available,
 	"heirlooms": (heirlooms as Dictionary).duplicate(true),
 	"family_ill_pending": family_ill_pending, "ill_who": ill_who,
@@ -629,6 +641,7 @@ func _load_game() -> bool:
 	month_frac = float(d.get("month_frac", month_frac))
 	if d.get("boundary_log") is Array:
 		boundary_log = d["boundary_log"]
+	child_pref = str(d.get("child_pref", child_pref))
 	apprentice_state = str(d.get("apprentice_state", apprentice_state))
 	master_available = bool(d.get("master_available", master_available))
 	if d.get("heirlooms") is Dictionary:
@@ -1350,7 +1363,8 @@ func _continuity_snapshot() -> Dictionary:
 			"father": father_name, "mother": mother_name},
 		"frac_probe": int(month_frac + 0.58),
 		"debt": {"units": debt_units, "due": debt_due, "state": debt_state, "deferrals": debt_deferrals, "sid": debt_due_sid},
-		"apprentice_state": apprentice_state, "master_available": master_available,
+		"child_pref": child_pref,
+	"apprentice_state": apprentice_state, "master_available": master_available,
 	"heirlooms": (heirlooms as Dictionary).duplicate(true),
 		"family": {"ill_pending": family_ill_pending, "ill_who": ill_who},
 	}
@@ -3107,6 +3121,78 @@ func _run_verify_smoke() -> void:
 		print("[VERIFY] FAIL master_chain can=", can_ask, " short=", short_ok, " refused=", refused_ok, " guarantee=", guar_ok, " gone=", gone_ok, " decline=", decline_ok, " reload=", reload_m_ok)
 
 
+	# M2-04：分阶段自主权——幼年有理由的封锁、少年能表达与拒绝、成年放开、重载保持
+	var keep_au_pov := pov
+	var keep_au_age := age
+	var keep_au_pref := child_pref
+	var keep_au_money := money
+	var keep_au_rel_f := int(relations.get("father", 0))
+	var keep_au_story: Dictionary = (story as Dictionary).duplicate(true)
+	var keep_au_facts: Array = (facts as Array).duplicate(true)
+	if pov != "child":
+		_switch_pov("child")
+	# 干净起点
+	ended = false
+	story.erase("没听家里的")
+	story.erase("家里不再供你读书")
+	story.erase("家里供不起")
+	child_pref = "none"
+	money = 500
+	facts = []
+	fact_seq = 0
+	# 1) 幼年：行动被拦且有可读理由
+	age = 3
+	var infant_reason := _action_block_reason({"id": "study", "min_age": 15, "min_stage": "adult"})
+	var infant_au_ok: bool = infant_reason != "" and infant_reason.contains("六岁前")
+	# 2) 幼年不能自选倾向
+	var too_young := _choose_preference("study")
+	var young_au_ok: bool = too_young == "too_young" and child_pref == "none"
+	# 3) 少年能表达倾向；家里穷会拒绝供读
+	age = 8
+	var pref_res := _choose_preference("craft")
+	var minor_au_ok: bool = pref_res == "ok" and child_pref == "craft"
+	money = 50
+	child_pref = "none"
+	var poor_res := _choose_preference("study")
+	var poor_au_ok: bool = poor_res == "family_refused" and bool(story.get("家里供不起", false)) and child_pref == "study"
+	# 4) 少年拒绝家里的安排：留痕、关系下降、读书被家里停掉
+	money = 500
+	age = 10
+	var rel_before := int(relations.get("father", 0))
+	var refuse_res := _refuse_family_arrangement()
+	var refused_au_ok: bool = refuse_res == "refused" and bool(story.get("没听家里的", false)) \
+		and int(relations.get("father", 0)) < rel_before and child_pref == "self"
+	var blocked_study := _action_block_reason({"id": "study", "min_age": 6})
+	var blocked_au_ok: bool = blocked_study.contains("不再供你读书")
+	# 5) 成年后门槛放开（先清掉"家里停供"这条剧情封锁，它属于另一条规则）
+	age = 18
+	story.erase("家里不再供你读书")
+	var adult_reason := _action_block_reason({"id": "study", "min_age": 15, "min_stage": "adult"})
+	var adult_au_ok: bool = adult_reason == ""
+	# 6) 存读档保持倾向
+	child_pref = "farm"
+	_save_game()
+	child_pref = "none"
+	_load_game()
+	var reload_au_ok: bool = child_pref == "farm"
+	var autonomy_pref_ok: bool = infant_au_ok and young_au_ok and minor_au_ok and poor_au_ok and refused_au_ok and blocked_au_ok and adult_au_ok and reload_au_ok
+	age = keep_au_age
+	child_pref = keep_au_pref
+	money = keep_au_money
+	relations["father"] = keep_au_rel_f
+	story = keep_au_story
+	facts = keep_au_facts
+	fact_seq = keep_au_facts.size()
+	if pov != keep_au_pov:
+		_switch_pov(keep_au_pov)
+	if autonomy_pref_ok:
+		oks += 1
+		print("[VERIFY] PASS autonomy_stages infant=", infant_au_ok, " young=", young_au_ok, " minor=", minor_au_ok, " poor=", poor_au_ok, " refuse=", refused_au_ok, " adult=", adult_au_ok, " reload=", reload_au_ok)
+	else:
+		fails.append("autonomy_stages")
+		print("[VERIFY] FAIL autonomy_stages infant=", infant_au_ok, " young=", young_au_ok, " minor=", minor_au_ok, " poor=", poor_au_ok, " refuse=", refused_au_ok, " blocked=", blocked_au_ok, " adult=", adult_au_ok, " reload=", reload_au_ok)
+
+
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
 	var keep_age := age
@@ -3848,6 +3934,22 @@ func _pick_scene_option(sid: String, oid: String) -> void:
 		var jump0 := _scene_months_to_next()
 		if jump0 > 0:
 			_advance_months(jump0)
+		Sfx.play("ok")
+		_save_game()
+		return
+	if sid == "kai_meng":
+		match oid:
+			"study":
+				var p1 := _choose_preference("study")
+				if p1 == "family_refused":
+					_toast("父亲算了算账，没接话。你把想读书的话咽了回去。", Color(0.62, 0.24, 0.18))
+			"craft":
+				_choose_preference("craft")
+			"farm":
+				_choose_preference("farm")
+			"rebel":
+				_refuse_family_arrangement()
+		scenes_done["%d_%s" % [year, sid]] = true
 		Sfx.play("ok")
 		_save_game()
 		return
@@ -6750,6 +6852,67 @@ func _decline_apprentice() -> void:
 	_toast("你在门口站了一会儿，到底没进去。", Color(0.30, 0.26, 0.21))
 
 
+## ------------------------------------------------------------------
+## M2-04 分阶段自主权
+## 0-6：家里做主；7-12：能表达倾向、争取机会、拒绝安排；13+：自己拿主意。
+## ------------------------------------------------------------------
+
+const PREF_VALUES := ["none", "study", "craft", "farm", "care", "self"]
+
+var child_pref := "none"
+
+
+func _action_block_reason(act: Dictionary) -> String:
+	# 不能行动时给出人能读懂的原因，而不是灰按钮
+	var need_age := int(act.get("min_age", 0))
+	if age < need_age:
+		if age < 7:
+			return "六岁前，家里替你做主，还轮不到你自己动手。"
+		return "这桩事要 %d 岁以后才轮得到你拿主意。" % need_age
+	var need := str(act.get("min_stage", ""))
+	if need != "" and int(STAGE_RANK.get(_autonomy_stage(), 2)) < int(STAGE_RANK.get(need, 2)):
+		return "你还小，先跟着大人学，过几年再说。"
+	if str(act.get("id", "")) == "study" and bool(story.get("家里不再供你读书", false)):
+		return "家里已经不再供你读书了；要读只能自己想办法。"
+	return ""
+
+
+func _preference_ok(pref: String) -> bool:
+	return PREF_VALUES.has(pref)
+
+
+func _choose_preference(pref: String) -> String:
+	# 返回 ok / too_young / bad_pref / family_refused
+	if age < 7:
+		return "too_young"
+	if not PREF_VALUES.has(pref):
+		return "bad_pref"
+	child_pref = pref
+	if pref == "study" and money < 200:
+		story["家里供不起"] = true
+		_log_fact("autonomy", "family_cannot_afford_school", {"money": money})
+		return "family_refused"
+	if pref == "craft" and apprentice_state == "none" and not master_available:
+		_log_fact("autonomy", "no_master_available", {})
+		return "family_refused"
+	_log_fact("autonomy", "preference_chosen", {"pref": pref, "age": age})
+	return "ok"
+
+
+func _refuse_family_arrangement() -> String:
+	# 孩子拒绝家里的安排：留下裂痕，但也保留自己找路的可能
+	if age < 7 or age > 15:
+		return "not_now"
+	story["没听家里的"] = true
+	story["家里不再供你读书"] = true
+	child_pref = "self"
+	relations["father"] = int(relations.get("father", 0)) - 1
+	relations["mother"] = int(relations.get("mother", 0)) - 1
+	_log_fact("autonomy", "refused_family", {"age": age})
+	_toast("你说不想按家里说的来。屋里静了半天。", Color(0.62, 0.24, 0.18))
+	return "refused"
+
+
 func _scene_ok(s: Dictionary) -> bool:
 	var cond := str(s.get("cond", ""))
 	match cond:
@@ -6761,6 +6924,8 @@ func _scene_ok(s: Dictionary) -> bool:
 			return family_ill_pending and ill_who != "" and not _actor_is_dead(ill_who)
 		"apprentice":
 			return _can_ask_apprentice()
+		"preference":
+			return age >= 7 and age <= 12 and child_pref == "none"
 	return true
 
 
