@@ -310,10 +310,10 @@
                                          "同tick按优先级和稳定ID排序，级联事件有上限与后续处理策略",
                                          "演员死亡/迁移和无候选有可解释结果，不无限循环"
                                      ],
-                      "status":  "todo",
+                      "status":  "in_progress",
                       "owner":  null,
                       "evidence":  [
-
+                                       "docs/verification/M2-02a.md"
                                    ],
                       "commit_sha":  null,
                       "remote_sha":  null,

@@ -105,7 +105,7 @@ var women_rank := 0
 var month_frac := 0.0
 
 ## 存档格式版本：字段增删时递增，读档据此做迁移
-const SAVE_SCHEMA_VERSION := 9
+const SAVE_SCHEMA_VERSION := 10
 var save_schema_seen := 0
 ## 读到更高版本的存档后置位：拒绝加载、拒绝覆盖
 var save_future := false
@@ -220,21 +220,22 @@ var ended := false
 const SAVE_DIR := "user://"
 
 ## 随机事件池：每年 32% 概率触发一条，按年龄与身份筛选
+## M2-02：机会定义。weight 决定被抽中的相对概率，cooldown 是最短复发间隔（月）
 const EVENTS := [
-	{"id": "drought", "min_age": 8},
-	{"id": "flood", "min_age": 8},
-	{"id": "levy", "min_age": 12},
-	{"id": "thieves", "min_age": 12},
-	{"id": "plague", "min_age": 10},
-	{"id": "suit", "min_age": 16},
-	{"id": "wedding", "min_age": 10},
-	{"id": "harvest", "min_age": 16, "cond": "farm"},
-	{"id": "reward", "min_age": 20, "cond": "famous"},
-	{"id": "school", "min_age": 25, "cond": "parent"},
-	{"id": "rash", "min_age": 1, "max_age": 6},
-	{"id": "riverfall", "min_age": 2, "max_age": 7},
-	{"id": "find_coin", "min_age": 3, "max_age": 8},
-	{"id": "quarrel", "min_age": 3, "max_age": 9},
+	{"id": "drought", "min_age": 8, "weight": 3, "cooldown": 60},
+	{"id": "flood", "min_age": 8, "weight": 3, "cooldown": 60},
+	{"id": "levy", "min_age": 12, "weight": 4, "cooldown": 24},
+	{"id": "thieves", "min_age": 12, "weight": 2, "cooldown": 36},
+	{"id": "plague", "min_age": 10, "weight": 1, "cooldown": 120},
+	{"id": "suit", "min_age": 16, "weight": 3, "cooldown": 24},
+	{"id": "wedding", "min_age": 10, "weight": 3, "cooldown": 36},
+	{"id": "harvest", "min_age": 16, "cond": "farm", "weight": 4, "cooldown": 12},
+	{"id": "reward", "min_age": 20, "cond": "famous", "weight": 2, "cooldown": 36},
+	{"id": "school", "min_age": 25, "cond": "parent", "weight": 2, "cooldown": 60},
+	{"id": "rash", "min_age": 1, "max_age": 6, "weight": 2, "cooldown": 12},
+	{"id": "riverfall", "min_age": 2, "max_age": 7, "weight": 2, "cooldown": 12},
+	{"id": "find_coin", "min_age": 3, "max_age": 8, "weight": 2, "cooldown": 12},
+	{"id": "quarrel", "min_age": 3, "max_age": 9, "weight": 2, "cooldown": 12},
 ]
 
 ## 各地点允许去的最小年龄；太小的时候只能在家
@@ -408,7 +409,7 @@ func _state_dict() -> Dictionary:
 		"parent_dead": parent_dead, "parent_death_year": parent_death_year,
 		"action_cooldown": action_cooldown, "last_settled_year": last_settled_year,
 		"facts": facts, "relations": relations, "actor_vitals": actor_vitals,
-		"event_instances": event_instances, "event_seq": event_seq,
+		"event_instances": event_instances, "event_seq": event_seq, "opp_last": opp_last,
 		# RNG 的 64 位 seed/state 用十进制字符串，避免 JSON 精度丢失
 		"sim_seed": str(sim_seed),
 		"sim_state": str(rng_world.state), "rng_actor_state": str(rng_actor.state),
@@ -592,6 +593,8 @@ func _load_game() -> bool:
 	if d.get("event_instances") is Array:
 		event_instances = d["event_instances"]
 	event_seq = int(d.get("event_seq", 0))
+	if d.get("opp_last") is Dictionary:
+		opp_last = d["opp_last"]
 	if d.has("sim_seed") and d.has("sim_state"):
 		sim_seed = int(str(d["sim_seed"]))
 		rng_world.seed = sim_seed
@@ -915,7 +918,7 @@ func _replay_snapshot() -> Dictionary:
 		"relations": (relations as Dictionary).duplicate(true),
 		"cooldown": (action_cooldown as Dictionary).duplicate(true),
 		"facts": (facts as Array).duplicate(true),
-		"pov_state": (pov_state as Dictionary).duplicate(true), "actor_vitals": (actor_vitals as Dictionary).duplicate(true), "event_instances": (event_instances as Array).duplicate(true), "event_seq": event_seq,
+		"pov_state": (pov_state as Dictionary).duplicate(true), "actor_vitals": (actor_vitals as Dictionary).duplicate(true), "event_instances": (event_instances as Array).duplicate(true), "event_seq": event_seq, "opp_last": (opp_last as Dictionary).duplicate(true),
 		"parent_dead": (parent_dead as Dictionary).duplicate(true),
 		"parent_death_year": (parent_death_year as Dictionary).duplicate(true),
 		"last_settled_year": last_settled_year,
@@ -955,6 +958,7 @@ func _replay_restore(snap: Dictionary) -> void:
 	actor_vitals = (snap["actor_vitals"] as Dictionary).duplicate(true)
 	event_instances = (snap["event_instances"] as Array).duplicate(true)
 	event_seq = int(snap["event_seq"])
+	opp_last = (snap["opp_last"] as Dictionary).duplicate(true)
 	parent_dead = (snap["parent_dead"] as Dictionary).duplicate(true)
 	parent_death_year = (snap["parent_death_year"] as Dictionary).duplicate(true)
 	last_settled_year = int(snap["last_settled_year"])
@@ -1659,6 +1663,38 @@ func _run_verify_smoke() -> void:
 	event_instances = []
 	event_seq = 0
 	age = keep_inst_age
+
+	# M2-02：机会冷却——刚发生过的短期不再进候选池
+	opp_last = {}
+	var keep_opp_age := age
+	age = 30
+	events_enabled = true
+	var pool_fresh := _eligible_opportunities()
+	var fresh_has_drought := false
+	for e in pool_fresh:
+		if str((e as Dictionary).get("id", "")) == "drought":
+			fresh_has_drought = true
+	opp_last["drought"] = _month_index()
+	var pool_cold := _eligible_opportunities()
+	var cold_has_drought := false
+	for e in pool_cold:
+		if str((e as Dictionary).get("id", "")) == "drought":
+			cold_has_drought = true
+	opp_last["drought"] = _month_index() - 120
+	var pool_warm := _eligible_opportunities()
+	var warm_has_drought := false
+	for e in pool_warm:
+		if str((e as Dictionary).get("id", "")) == "drought":
+			warm_has_drought = true
+	var opp_ok: bool = fresh_has_drought and not cold_has_drought and warm_has_drought
+	if opp_ok:
+		oks += 1
+		print("[VERIFY] PASS opportunity_cooldown fresh=", pool_fresh.size(), " cold=", pool_cold.size(), " warm=", pool_warm.size())
+	else:
+		fails.append("opportunity_cooldown")
+		print("[VERIFY] FAIL opportunity_cooldown fresh=", fresh_has_drought, " cold=", cold_has_drought, " warm=", warm_has_drought)
+	opp_last = {}
+	age = keep_opp_age
 
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
@@ -4825,6 +4861,8 @@ func _pick_from(pool: Array) -> Dictionary:
 ## 实例带到期月份与来源，M2-02 的调度器可以直接排它。
 var event_instances: Array = []
 var event_seq := 0
+## M2-02：机会上次被安排的时间（id → 月序号），用于冷却
+var opp_last: Dictionary = {}
 
 
 func _enqueue_event(id: String, cause: String, due_month: int) -> int:
@@ -4854,19 +4892,50 @@ func _drain_due_events() -> int:
 	return fired
 
 
+func _eligible_opportunities() -> Array:
+	# M2-02：候选 = 条件满足 + 冷却已过
+	var now := _month_index()
+	var pool: Array = []
+	for e in EVENTS:
+		if not _event_ok(e):
+			continue
+		var eid := str((e as Dictionary).get("id", ""))
+		var cd := int((e as Dictionary).get("cooldown", 24))
+		if opp_last.has(eid) and now - int(opp_last[eid]) < cd:
+			continue
+		pool.append(e)
+	return pool
+
+
+func _weighted_pick(pool: Array) -> Dictionary:
+	var total := 0.0
+	for e in pool:
+		total += float((e as Dictionary).get("weight", 1))
+	if total <= 0.0:
+		return {}
+	var roll := _rnd() * total
+	for e in pool:
+		roll -= float((e as Dictionary).get("weight", 1))
+		if roll <= 0.0:
+			return e
+	return pool[pool.size() - 1]
+
+
 func _roll_event() -> void:
+	# M2-02：年度机会调度——先过滤冷却与条件，再按权重抽，入队后按期触发
 	if not events_enabled:
 		return
 	if _rnd() > 0.32:
 		return
-	var pool: Array = []
-	for e in EVENTS:
-		if _event_ok(e):
-			pool.append(e)
+	var pool := _eligible_opportunities()
 	if pool.is_empty():
 		return
-	var ev: Dictionary = _pick_from(pool)
-	_enqueue_event(str(ev["id"]), "year_end", _month_index())
+	var ev := _weighted_pick(pool)
+	if ev.is_empty():
+		return
+	var eid := str(ev["id"])
+	opp_last[eid] = _month_index()
+	_enqueue_event(eid, "opportunity", _month_index() + _rndi(0, 2))
 	_drain_due_events()
 
 

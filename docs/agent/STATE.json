@@ -9,9 +9,9 @@
     "godot_run":  "import_only",
     "game_code_modified":  false,
     "remote_mutations_performed":  true,
-    "current_task":  "M2-01",
+    "current_task":  "M2-02",
     "next_task":  "M1-04",
-    "task_status":  "M2-01a-pushed",
+    "task_status":  "M2-02a-pushed",
     "branch":  "16 个 agent/* 堆叠分支（见 docs/DELIVERY_M1.md）",
     "base_sha":  "bf0846f1c20cbcf4dd0cf5f5707b0cf1c88e12cb",
     "commit_sha":  "4466c07634746641983a8522d06997e3b5e61d03",
@@ -24,5 +24,5 @@
                      "docs/BASELINE.md",
                      "docs/tasks/M0-01.md"
                  ],
-    "next_step":  "M2-02 到期队列与机会调度（复用 event_instances）"
+    "next_step":  "M2-03 因果样例；或 M2-02b 互斥与季节窗口"
 }
