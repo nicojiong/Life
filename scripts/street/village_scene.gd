@@ -602,11 +602,20 @@ func _load_game() -> bool:
 		actor_vitals = d["actor_vitals"]
 	else:
 		# 旧档：从 pov_state 的旧字段迁移出生命值
+		# 关键：全局字段属于当前视角的人，不能一律当成孩子——那会把父亲的血条安到孩子身上
 		actor_vitals = {}
 		for k in pov_state.keys():
 			var ps2: Dictionary = pov_state[k]
 			actor_vitals[str(k)] = {"age": int(ps2.get("age", 0)), "health": float(ps2.get("health", 100.0)), "lifespan": int(ps2.get("lifespan", 100))}
-		actor_vitals["child"] = {"age": age, "health": health, "lifespan": lifespan}
+		actor_vitals[pov] = {"age": age, "health": health, "lifespan": lifespan}
+		if not actor_vitals.has("child"):
+			# 旧档没存孩子的状态时，用年号推算年龄，给一个中性健康值，绝不抄当前视角
+			actor_vitals["child"] = {
+				"age": maxi(0, year - birth_year),
+				"health": 80.0,
+				"lifespan": 60,
+				"estimated": true,
+			}
 	if d.get("event_instances") is Array:
 		event_instances = d["event_instances"]
 	event_seq = int(d.get("event_seq", 0))
@@ -2007,6 +2016,64 @@ func _run_verify_smoke() -> void:
 	else:
 		fails.append("event_effects_from_data")
 		print("[VERIFY] FAIL event_effects_from_data money=", data_money_ok, " fame=", data_fame_ok, " story=", data_story_ok, " drought=", data_delta_ok)
+
+	# M2-08：赴任路径必须能真的跑通，县名是字符串而不是字典
+	var keep_office := office_rank
+	var keep_county := county
+	var keep_rank_mil := mil_rank
+	office_rank = 0
+	county = ""
+	_apply_special("take_post")
+	var county_ok: bool = office_rank == 1 and county != "" and county.length() >= 2
+	var county_seen := county
+	office_rank = keep_office
+	county = keep_county
+	mil_rank = keep_rank_mil
+	if county_ok:
+		oks += 1
+		print("[VERIFY] PASS take_post_assigns_county county=", county_seen)
+	else:
+		fails.append("take_post_assigns_county")
+		print("[VERIFY] FAIL take_post_assigns_county office=", office_rank, " county=", county)
+
+	# M2-09：三种视角的旧档迁移——孩子不能被安上父亲的年龄/健康/寿数
+	var pov_fixtures := [
+		["res://tests/fixtures/save_v1_child.json", "child"],
+		["res://tests/fixtures/save_v1_father.json", "father"],
+		["res://tests/fixtures/save_v1_mother.json", "mother"],
+	]
+	var pov_ok := true
+	var pov_detail: Array = []
+	for pair in pov_fixtures:
+		var fx2 := FileAccess.open(str(pair[0]), FileAccess.READ)
+		if fx2 == null:
+			pov_ok = false
+			pov_detail.append("missing:" + str(pair[0]))
+			continue
+		var txt := fx2.get_as_text()
+		fx2.close()
+		var w2 := FileAccess.open(_save_file(), FileAccess.WRITE)
+		w2.store_string(txt)
+		w2.close()
+		save_future = false
+		var loaded2 := _load_game()
+		var v_child := _vitals_of("child")
+		var v_father := _vitals_of("father")
+		var child_age_ok: bool = int(v_child["age"]) == 10
+		var father_age_ok: bool = int(v_father["age"]) == 44
+		if not (loaded2 and pov == str(pair[1]) and child_age_ok and father_age_ok):
+			pov_ok = false
+			pov_detail.append("%s:pov=%s child=%s father=%s" % [str(pair[1]), pov, str(v_child["age"]), str(v_father["age"])])
+	# 三个 fixture 跑完后视角停在最后一个（母亲），要切回孩子，否则后面的死亡路径会走成送父母
+	if pov != "child":
+		_switch_pov("child")
+	ended = false
+	if pov_ok:
+		oks += 1
+		print("[VERIFY] PASS old_save_pov_migration child=10 father=44")
+	else:
+		fails.append("old_save_pov_migration")
+		print("[VERIFY] FAIL old_save_pov_migration ", pov_detail)
 
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
@@ -4866,7 +4933,8 @@ func _apply_special(s: String) -> void:
 	elif s == "take_post":
 		office_rank = 1
 		var names := ["吴县", "长洲", "常熟", "昆山", "嘉定", "华亭"]
-		county = str(_pick_from(names))
+		var picked: Variant = _pick_from(names)
+		county = str(picked) if picked is String else str(names[0])
 		var bonus_note := ""
 		if mil_rank >= 2:
 			gov_merit += 2
@@ -5200,8 +5268,9 @@ func _event_ok(ev: Dictionary) -> bool:
 	return true
 
 
-func _pick_from(pool: Array) -> Dictionary:
+func _pick_from(pool: Array) -> Variant:
 	# 事件与城名等随机挑选必须走可复现的模拟流，不能用未保存的全局 RNG
+	# 返回 Variant：事件池里是 Dictionary，城名池里是 String，不能都标成 Dictionary
 	if pool.is_empty():
 		return {}
 	return pool[_rndi(0, pool.size() - 1)]
