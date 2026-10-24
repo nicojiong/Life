@@ -831,6 +831,72 @@ func debug_scene_panel() -> void:
 	print("[SCENE] 下个节令=", nxt.get("name", "无"))
 
 
+const KNOWN_TRADES := ["农", "匠", "商", "兵", "吏"]
+const OCCUPATION_FLAGS := ["农家", "匠人", "商贾", "商人", "军户", "士人", "读书"]
+
+
+func _content_issues() -> Array:
+	# M2 地基：内容 ID 与必填字段的静态校验，出错时给断言一个明确的名字
+	var issues: Array = []
+	var seen_ev := {}
+	for ev in EVENTS:
+		var eid := str((ev as Dictionary).get("id", ""))
+		if eid == "":
+			issues.append("event_without_id")
+			continue
+		if seen_ev.has(eid):
+			issues.append("dup_event:" + eid)
+		seen_ev[eid] = true
+		var ma := int((ev as Dictionary).get("min_age", 0))
+		var xa := int((ev as Dictionary).get("max_age", 120))
+		if ma < 0 or ma > 100 or xa < ma:
+			issues.append("event_bad_age:" + eid)
+	var seen_child := {}
+	for ev in CHILD_EVENTS:
+		var cid := str((ev as Dictionary).get("id", ""))
+		if cid == "":
+			issues.append("child_event_without_id")
+		elif seen_child.has(cid):
+			issues.append("dup_child_event:" + cid)
+		seen_child[cid] = true
+	var seen_scene := {}
+	for sc in YEAR_SCENES:
+		var sid := str((sc as Dictionary).get("id", ""))
+		if not SCENE_OPTS.has(sid):
+			issues.append("scene_without_options:" + sid)
+		if seen_scene.has(sid):
+			issues.append("dup_scene:" + sid)
+		seen_scene[sid] = true
+		var opts: Array = SCENE_OPTS.get(sid, [])
+		if opts.size() < 2:
+			issues.append("scene_too_few_options:" + sid)
+		var seen_opt := {}
+		for op in opts:
+			var oid := str((op as Dictionary).get("id", ""))
+			if oid == "":
+				issues.append("scene_option_without_id:" + sid)
+			elif seen_opt.has(oid):
+				issues.append("dup_scene_option:%s:%s" % [sid, oid])
+			seen_opt[oid] = true
+	# 出身：职业 flag 必须能被映射成父亲行当
+	for o in DB.origins:
+		var flags: Array = (o as Dictionary).get("flags", [])
+		if flags.is_empty():
+			issues.append("origin_without_flags:" + str((o as Dictionary).get("name", "?")))
+			continue
+		var covered := false
+		for fl in OCCUPATION_FLAGS:
+			if flags.has(fl):
+				covered = true
+		if not covered:
+			issues.append("origin_without_occupation:" + str((o as Dictionary).get("name", "?")))
+		if not KNOWN_TRADES.has(_father_trade_for(flags)):
+			issues.append("origin_bad_trade:" + str((o as Dictionary).get("name", "?")))
+		if int((o as Dictionary).get("weight", 0)) <= 0:
+			issues.append("origin_bad_weight:" + str((o as Dictionary).get("name", "?")))
+	return issues
+
+
 func _replay_snapshot() -> Dictionary:
 	# M1-05：黄金重放要能回到同一起点，所以先把会被改动的状态整体存下来
 	return {
@@ -1542,6 +1608,15 @@ func _run_verify_smoke() -> void:
 	else:
 		fails.append("actor_vitals_roundtrip")
 		print("[VERIFY] FAIL actor_vitals_roundtrip f=", f_ok, " m=", m_ok, " c=", c_ok, " back=", f_back)
+
+	# M2 地基：内容 ID 与必填字段的静态校验
+	var c_issues := _content_issues()
+	if c_issues.is_empty():
+		oks += 1
+		print("[VERIFY] PASS content_ids_valid events=", EVENTS.size(), " scenes=", YEAR_SCENES.size())
+	else:
+		fails.append("content_ids_valid")
+		print("[VERIFY] FAIL content_ids_valid ", c_issues)
 
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money

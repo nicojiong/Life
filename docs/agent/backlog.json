@@ -283,10 +283,10 @@
                                          "同一事件定义可以绑定不同合法人物",
                                          "定义与运行中的事件状态分离，无任意eval"
                                      ],
-                      "status":  "todo",
+                      "status":  "in_progress",
                       "owner":  null,
                       "evidence":  [
-
+                                       "docs/verification/content-validation.md"
                                    ],
                       "commit_sha":  null,
                       "remote_sha":  null,
