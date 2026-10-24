@@ -1081,6 +1081,26 @@ func _run_verify_smoke() -> void:
 		print("[VERIFY] FAIL facts_have_causes ok=", ok_facts, " kinds=", kinds)
 	facts = []
 
+	# M1-03c：墓志引用事实日志
+	facts = []
+	var no_trace := _facts_trace() == ""
+	_log_fact("exam", "jieshi_pass", {"year": year})
+	_log_fact("exam", "jieshi_fail", {"year": year})
+	_log_fact("event", "year_end", {"id": "drought"})
+	var with_trace := _facts_trace()
+	var in_epitaph := false
+	for line in _epitaph():
+		if str(line).begins_with("一生所记"):
+			in_epitaph = true
+	if no_trace and with_trace.find("应试2次") >= 0 and in_epitaph:
+		oks += 1
+		print("[VERIFY] PASS epitaph_uses_facts ", with_trace)
+	else:
+		fails.append("epitaph_uses_facts")
+		print("[VERIFY] FAIL epitaph_uses_facts empty_ok=", no_trace,
+			" trace=", with_trace, " in_epitaph=", in_epitaph)
+	facts = []
+
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
 	var keep_age := age
@@ -4351,6 +4371,33 @@ func given_text() -> String:
 	return name_text.substr(1) if name_text.length() > 1 else name_text
 
 
+func _facts_trace() -> String:
+	# M1-03c：墓志必须引用真实发生过的事，而不是只拼终值
+	if facts.is_empty():
+		return ""
+	var counts := {}
+	for f in facts:
+		var k := str((f as Dictionary).get("kind", ""))
+		counts[k] = int(counts.get(k, 0)) + 1
+	var parts: Array = []
+	if counts.has("exam"):
+		parts.append("应试%d次" % int(counts["exam"]))
+	if counts.has("event"):
+		parts.append("逢变故%d次" % int(counts["event"]))
+	if counts.has("marriage"):
+		parts.append("成家一次")
+	if counts.has("death"):
+		parts.append("送亲%d人" % int(counts["death"]))
+	if parts.is_empty():
+		return ""
+	var s := ""
+	for i in range(parts.size()):
+		if i > 0:
+			s += "、"
+		s += str(parts[i])
+	return "一生所记：" + s + "。"
+
+
 func _epitaph() -> Array:
 	var lines: Array = []
 	var tier := _tier()
@@ -4403,6 +4450,9 @@ func _epitaph() -> Array:
 		lines.append("子%d人。" % children)
 	else:
 		lines.append("无子。")
+	var trace := _facts_trace()
+	if trace != "":
+		lines.append(trace)
 	if int(story.get("欠年", 0)) >= 3:
 		lines.append("晚年家道中落，靠乡邻接济度日。")
 	if story.has("赖账"):
