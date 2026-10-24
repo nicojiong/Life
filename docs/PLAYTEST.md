@@ -8,12 +8,12 @@
 
 | 目标 | 双击 | 说明 |
 |---|---|---|
-| **试玩（推荐）** | `playtest.bat` | 用独立存档目录，不影响你原来的档 |
+| **试玩（推荐）** | `playtest.bat` | 用独立存档目录 `LifePlaytest`，不影响你原来的档 |
 | 普通启动 | `play.bat` | 用项目原存档目录 `浮生` |
 
 两者都只用 Godot 4.7.2 直接跑工程，不用测试 stage、不带 `--fresh`、不碰截图入口。
 
-`playtest.bat` 做的事：把工程同步到 `playtest_build\`，把 `config/name` 改成「浮生试玩」，所以 Godot 的存档目录变成另一个。原目录完全不动。
+`playtest.bat` 做的事：把工程同步到 `playtest_build\`，把 `config/name` 改成 `LifePlaytest`，所以 Godot 的存档目录变成另一个。原目录完全不动。首次启动会先复制一遍（几秒），之后每次同步。
 
 如果提示找不到 Godot：设置环境变量 `GODOT_BIN` 指向 `Godot_v4.7.2-stable_win64.exe`，或把它放到工程根目录。
 
@@ -43,13 +43,13 @@
 
 | 用途 | 路径 |
 |---|---|
-| 试玩存档 | `%APPDATA%\Godot\app_userdata\浮生试玩\` |
+| 试玩存档 | `%APPDATA%\Godot\app_userdata\LifePlaytest\` |
 | 原存档（未动） | `%APPDATA%\Godot\app_userdata\浮生\` |
 
 存档文件：`fusheng_save_1.json`（另有 `.bak` 备份、`.tmp` 写入中间态）。三个存档位对应 `_1/_2/_3`。
 
 **备份**：把整个 `浮生试玩` 文件夹复制一份即可；恢复时复制回去。
-**想要全新开局**：不要删档——把 `浮生试玩` 文件夹改名（例如加 `-old`），再启动 `playtest.bat`，就会从随机出生开始。
+**想要全新开局**：不要删档——把 `LifePlaytest` 文件夹改名（例如加 `-old`），再启动 `playtest.bat`，就会从随机出生开始。
 
 ## 5. 当前未完成 / 已知会遇到的
 
@@ -63,4 +63,12 @@
 ## 6. 遇到问题请记下
 
 请保存：**截图**、**当前年月**（左上）、**当前操控人物**、**你刚做了什么操作**。
-如果游戏崩溃或卡住，`%APPDATA%\Godot\app_userdata\浮生试玩\logs\` 里的日志也一并留着。
+如果游戏崩溃或卡住，`%APPDATA%\Godot\app_userdata\LifePlaytest\logs\` 里的日志也一并留着（`godot.log`）。
+## 7. 2026-10-24 修复：双击没反应的三个原因
+
+1. 两个 `.bat` 之前存成了 UTF-8 含中文，本机 cmd 用 GBK 读，中文注释被当成命令执行，窗口一闪就退；
+2. `echo ... -> playtest_build ...` 里的 `>` 被 cmd 当成重定向，生成一个叫 `playtest_build` 的**文件**，把目录挡住了；
+3. 存档目录原本用中文名「浮生试玩」，为避开编码问题改为 `LifePlaytest`。
+
+现在两个 bat 都是纯 ASCII；构建目录每次启动重新同步。
+旧的空目录 `%APPDATA%\Godot\app_userdata\浮生试玩` 可以手动删掉。

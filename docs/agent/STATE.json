@@ -28,7 +28,7 @@
     "playtest":  {
                      "baseline_sha":  "b50abd09f01a5664822f91d8101126ef4d09e89f",
                      "entry":  "playtest.bat（独立存档 浮生试玩） / play.bat（原存档 浮生）",
-                     "save_dir":  "%APPDATA%\\Godot\\app_userdata\\浮生试玩",
+                     "save_dir":  "%APPDATA%\\Godot\\app_userdata\\LifePlaytest",
                      "docs":  "docs/PLAYTEST.md"
                  }
 }
