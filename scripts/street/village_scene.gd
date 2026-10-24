@@ -618,6 +618,13 @@ func _load_game() -> bool:
 			}
 	if d.get("event_instances") is Array:
 		event_instances = d["event_instances"]
+		# schema 12 的旧档没有 target/policy：不假装能恢复主体，也不静默交给孩子
+		for inst_l in event_instances:
+			if not (inst_l as Dictionary).has("target"):
+				inst_l["target"] = ""
+				inst_l["legacy_unknown_target"] = true
+			if not (inst_l as Dictionary).has("policy"):
+				inst_l["policy"] = "cancel"
 	event_seq = int(d.get("event_seq", 0))
 	if d.get("opp_last") is Dictionary:
 		opp_last = d["opp_last"]
@@ -2267,6 +2274,67 @@ func _run_verify_smoke() -> void:
 	else:
 		fails.append("event_actor_binding")
 		print("[VERIFY] FAIL event_actor_binding child=", child_hit, " father=", father_untouched, " cancel=", cancelled_ok, " restore=", restore_ok, " once=", once_ok)
+
+	# M2-01c：取消不算发生过；非当前人物扣血也要走死亡结算；旧档缺主体显式取消
+	var keep_c_inst: Array = (event_instances as Array).duplicate(true)
+	var keep_c_seq := event_seq
+	var keep_c_facts: Array = (facts as Array).duplicate(true)
+	var keep_c_pov := pov
+	var keep_c_events := events_enabled
+	events_enabled = false
+	if pov != "child":
+		_switch_pov("child")
+	facts = []
+	fact_seq = 0
+	event_instances = []
+	event_seq = 0
+	# 1) 父亲已死，取消他的疫病：既不算变故，也不产生墓志句子
+	parent_dead["father"] = true
+	_enqueue_event("plague", "test", _month_index(), 0, "father", "cancel")
+	_drain_due_events()
+	var cancelled_events := _count_facts("event")
+	var cancelled_marks := _count_facts("event_cancelled_dead_target")
+	var story_for_cancel := _story_lines().size()
+	var cancel_ok: bool = cancelled_events == 0 and cancelled_marks == 1 and story_for_cancel == 0
+	parent_dead["father"] = false
+	# 2) 孩子（非当前视角）被扣到 0 健康：必须判死，转移也不能落到他身上
+	event_instances = []
+	_switch_pov("father")
+	actor_vitals["child"] = {"age": 10, "health": 1.0, "lifespan": 60}
+	_enqueue_event("drought", "test", _month_index(), 0, "child", "cancel")
+	_drain_due_events()
+	var child_dead: bool = _actor_is_dead("child")
+	_enqueue_event("plague", "test", _month_index(), 0, "father", "transfer")
+	_drain_due_events()
+	var transfer_refused := _count_facts("event_transferred") == 0
+	var transfer_ok: bool = child_dead and transfer_refused
+	ended = false
+	if pov != "child":
+		_switch_pov("child")
+	# 3) 旧档事件缺 target：按未知主体取消
+	event_instances = []
+	event_seq = 0
+	fact_seq = facts.size()
+	var events_before_legacy := _count_facts("event")
+	event_instances.append({"sid": 1, "id": "drought", "cause": "test", "due": _month_index(), "fired": false,
+		"cause_fid": 0, "policy": "cancel"})
+	_drain_due_events()
+	var unknown_marks := _count_facts("event_cancelled_unknown_target")
+	var unknown_ok: bool = unknown_marks == 1 and _count_facts("event") == events_before_legacy
+	event_instances = keep_c_inst
+	event_seq = keep_c_seq
+	facts = keep_c_facts
+	fact_seq = keep_c_facts.size()
+	events_enabled = keep_c_events
+	if pov != keep_c_pov:
+		_switch_pov(keep_c_pov)
+	var bound_ok: bool = cancel_ok and transfer_ok and unknown_ok
+	if bound_ok:
+		oks += 1
+		print("[VERIFY] PASS event_boundaries cancel=", cancel_ok, " transfer=", transfer_ok, " legacy=", unknown_ok)
+	else:
+		fails.append("event_boundaries")
+		print("[VERIFY] FAIL event_boundaries cancel=", cancel_ok, " transfer=", transfer_ok, " legacy=", unknown_ok, " dead=", child_dead)
 
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
@@ -5314,6 +5382,11 @@ func _on_new_year() -> void:
 			_toast("%s也走了，就在这一年。" % (father_name if kid == "father" else mother_name),
 				Color(0.62, 0.24, 0.18))
 			_spawn_npcs()
+	# 非当前视角的孩子健康归零，同样要走死亡结算（否则读档后仍被当成活人）
+	if not ended and pov != "child" and float(_vitals_of("child")["health"]) <= 0.0:
+		boundary_log.append("death_active")
+		_settle_actor_death("child", "health")
+		return
 	if health <= 0.0:
 		lifespan = age
 	if age == 1 and not milestones.has("zhuazhou"):
@@ -5509,19 +5582,28 @@ func _drain_due_events() -> int:
 		if int((inst as Dictionary).get("due", 0)) > now:
 			continue
 		inst["fired"] = true
-		var ev_fid := _log_fact("event", str(inst.get("cause", "unknown")),
-			{"id": str(inst["id"]), "sid": int(inst["sid"])}, int(inst.get("cause_fid", 0)))
-		last_event_fid = ev_fid
-		inst["fid"] = ev_fid
-		# M2-03c：事件带来的实际变化单独记一条，指向事件本身
+		# M2-01c：先结算，再按结果写不同种类的事实——取消/转移不算"真的发生过"
 		var before_money := money
 		var before_land := land
-		_apply_event_for(str(inst.get("target", "child")), str(inst["id"]), str(inst.get("policy", "cancel")))
-		var d_money := money - before_money
-		var d_land := land - before_land
-		if d_money != 0 or d_land != 0:
-			_log_fact("consequence", "event_effect",
-				{"id": str(inst["id"]), "money": d_money, "land": d_land}, ev_fid)
+		var status := _apply_event_for(str(inst.get("target", "")), str(inst["id"]),
+			str(inst.get("policy", "cancel")))
+		var ev_fid := 0
+		if status == "applied" or status == "transferred":
+			ev_fid = _log_fact("event", str(inst.get("cause", "unknown")),
+				{"id": str(inst["id"]), "sid": int(inst["sid"])}, int(inst.get("cause_fid", 0)))
+			last_event_fid = ev_fid
+			inst["fid"] = ev_fid
+		else:
+			_log_fact("event_" + status, str(inst.get("cause", "unknown")),
+				{"id": str(inst["id"]), "sid": int(inst["sid"]),
+					"target": str(inst.get("target", "unknown"))}, int(inst.get("cause_fid", 0)))
+		if ev_fid != 0:
+			# M2-03c：事件带来的实际变化单独记一条，指向事件本身
+			var d_money := money - before_money
+			var d_land := land - before_land
+			if d_money != 0 or d_land != 0:
+				_log_fact("consequence", "event_effect",
+					{"id": str(inst["id"]), "money": d_money, "land": d_land}, ev_fid)
 		fired += 1
 	var alive_list: Array = []
 	for inst in event_instances:
@@ -5599,23 +5681,68 @@ func _apply_event_effects(def: Dictionary) -> void:
 
 func _actor_is_dead(who: String) -> bool:
 	if who == "child":
-		return ended
+		if ended:
+			return true
+		# 健康归零即视为已死，即便还没走到死亡结算（避免"活的死人"接走转移事件）
+		return float(_vitals_of("child")["health"]) <= 0.0
 	return bool(parent_dead.get(who, false))
 
 
-func _apply_event_for(who: String, id: String, policy: String) -> void:
+func _apply_event_for(who: String, id: String, policy: String) -> String:
+	# 返回结算结果：applied / transferred / cancelled_dead_target / cancelled_unknown_target
+	# 由 _drain_due_events 写入不同种类的事实，避免"取消"被当成"发生过"
+	if who == "":
+		# 旧档没有记录主体：不假装恢复，也不静默交给孩子
+		return "cancelled_unknown_target"
 	var target := who
 	if _actor_is_dead(target):
 		if policy == "transfer" and not _actor_is_dead("child"):
-			target = "child"
-			_log_fact("event", "transferred", {"id": id, "from": who, "to": target})
-		else:
-			_log_fact("event", "cancelled_dead_target", {"id": id, "who": who})
-			return
-	if target == pov:
+			_apply_event_to_actor("child", id)
+			return "transferred"
+		return "cancelled_dead_target"
+	_apply_event_to_actor(target, id)
+	return "applied"
+
+
+func _apply_event_to_actor(who: String, id: String) -> void:
+	if who == pov:
 		_apply_event(id)
 		return
-	_apply_event_to_inactive(target, id)
+	_apply_event_to_inactive(who, id)
+
+
+func _settle_actor_death(who: String, cause: String) -> void:
+	# 按 actor_id 结算死亡：孩子死 = 这一局结束；父母死 = 登记在本人名下
+	if _actor_is_dead(who):
+		return
+	if who == "child":
+		if pov != "child":
+			_switch_pov("child")
+		death_cause = cause
+		_ending()
+		return
+	parent_dead[who] = true
+	parent_death_year[who] = year
+	parents_alive = maxi(0, parents_alive - 1)
+	_log_fact("death", cause, {"who": who, "age": int(_vitals_of(who)["age"])})
+	if pov == who:
+		_switch_pov("child")
+	_spawn_npcs()
+	_refresh_pov_bar()
+
+
+func _check_actor_deaths() -> void:
+	# 任何人（含非当前视角）健康归零或到寿，都走同一条死亡结算
+	for id in ["child", "father", "mother"]:
+		if ended:
+			return
+		if _actor_is_dead(str(id)):
+			continue
+		var v := _vitals_of(str(id))
+		if float(v["health"]) <= 0.0:
+			_settle_actor_death(str(id), "health")
+		elif int(v["age"]) >= int(v["lifespan"]):
+			_settle_actor_death(str(id), "old_age")
 
 
 func _apply_event_to_inactive(who: String, id: String) -> void:
@@ -5649,7 +5776,8 @@ func _apply_event_to_inactive(who: String, id: String) -> void:
 				money += maxi(300, land_n * 60)
 	actor_vitals[who] = v
 	pov_state[who] = st
-	_log_fact("event", "applied_to_inactive", {"id": id, "who": who})
+	# 扣到 0 健康也要按 actor_id 走死亡结算，不能留一个"活的死人"
+	_check_actor_deaths()
 
 
 func _apply_event(id: String) -> void:
