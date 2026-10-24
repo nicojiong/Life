@@ -2750,6 +2750,60 @@ func _run_verify_smoke() -> void:
 		fails.append("content_schema_validation")
 		print("[VERIFY] FAIL content_schema_validation shipped=", schema_ok, " found=", all_found, " precise=", path_precise, " codes=", codes)
 
+	# M2-02：队列策略——互斥、过期、显式取消，且都不算“真实发生”
+	var keep_q_inst: Array = (event_instances as Array).duplicate(true)
+	var keep_q_seq := event_seq
+	var keep_q_facts: Array = (facts as Array).duplicate(true)
+	var keep_q_money := money
+	var keep_q_pov := pov
+	if pov != "child":
+		_switch_pov("child")
+	event_instances = []
+	event_seq = 0
+	facts = []
+	fact_seq = 0
+	money = 1000
+	# 1) 互斥：同组第二条入队被拒
+	var sid_a := _enqueue_event("drought", "q1", _month_index(), 0, "child", "cancel", "mood", 0)
+	var sid_b := _enqueue_event("flood", "q2", _month_index(), 0, "child", "cancel", "mood", 0)
+	var mutex_ok: bool = sid_a > 0 and sid_b == 0 and event_instances.size() == 1
+	# 2) 过期：到期时已过期的事件不执行
+	event_instances = []
+	event_seq = 0
+	money = 1000
+	# 到期时间已越过有效窗口：到期那一刻就该判过期
+	_enqueue_event("drought", "q3", _month_index() + 1, 0, "child", "cancel", "", _month_index())
+	_advance_months(3)
+	var expired_ok: bool = money == 1000 and _count_facts("event_expired") == 1 and _count_facts("event") == 0
+	# 3) 显式取消
+	event_instances = []
+	event_seq = 0
+	facts = []
+	fact_seq = 0
+	var sid_c := _enqueue_event("flood", "q4", _month_index() + 5, 0, "child", "cancel", "", 0)
+	money = 1000
+	var cancelled := _cancel_event(sid_c, "test_cancel")
+	_drain_due_events()
+	var cancel_money := money
+	var cancel_marks := _count_facts("event_cancelled")
+	var cancel_events := _count_facts("event")
+	var cancel_ok2: bool = cancelled and cancel_money == 1000 and cancel_marks == 1 and cancel_events == 0
+	var queue_ok: bool = mutex_ok and expired_ok and cancel_ok2
+	event_instances = keep_q_inst
+	event_seq = keep_q_seq
+	facts = keep_q_facts
+	fact_seq = keep_q_facts.size()
+	money = keep_q_money
+	if pov != keep_q_pov:
+		_switch_pov(keep_q_pov)
+	if queue_ok:
+		oks += 1
+		print("[VERIFY] PASS queue_policies mutex=", mutex_ok, " expire=", expired_ok, " cancel=", cancel_ok2)
+	else:
+		fails.append("queue_policies")
+		print("[VERIFY] FAIL queue_policies mutex=", mutex_ok, " expire=", expired_ok, " cancel=", cancel_ok2, " sid=", sid_c, " cancelled=", cancelled, " money=", cancel_money, " marks=", cancel_marks, " events=", cancel_events)
+
+
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
 	var keep_age := age
@@ -5963,9 +6017,12 @@ var event_seq := 0
 var opp_last: Dictionary = {}
 
 
-func _enqueue_event(id: String, cause: String, due_month: int, cause_fid: int = 0, target: String = "", policy: String = "cancel") -> int:
+func _enqueue_event(id: String, cause: String, due_month: int, cause_fid: int = 0, target: String = "", policy: String = "cancel", group: String = "", expire_month: int = 0) -> int:
+	# M2-02：互斥组里已有未结算事件时，新事件不入队（返回 0）
+	if group != "" and _has_pending_group(group):
+		_log_fact("event_rejected", "mutex", {"id": id, "group": group})
+		return 0
 	event_seq += 1
-	# M2-01b：事件实例绑定承受者；主体死了按 policy 处理（cancel 取消 / transfer 转给孩子）
 	var who := target
 	if who == "":
 		who = pov
@@ -5973,8 +6030,29 @@ func _enqueue_event(id: String, cause: String, due_month: int, cause_fid: int = 
 		"sid": event_seq, "id": id, "cause": cause, "due": due_month,
 		"fired": false, "cause_fid": cause_fid,
 		"target": who, "policy": policy,
+		"group": group, "expire": expire_month,
 	})
 	return event_seq
+
+
+func _has_pending_group(group: String) -> bool:
+	for inst in event_instances:
+		var d: Dictionary = inst
+		if not bool(d.get("fired", false)) and str(d.get("group", "")) == group:
+			return true
+	return false
+
+
+func _cancel_event(sid: int, reason: String) -> bool:
+	# 显式取消：不执行效果，只记一条取消事实
+	for inst in event_instances:
+		var d: Dictionary = inst
+		if int(d.get("sid", 0)) != sid or bool(d.get("fired", false)):
+			continue
+		d["fired"] = true
+		_log_fact("event_cancelled", reason, {"id": str(d.get("id", "")), "sid": sid})
+		return true
+	return false
 
 
 func _drain_due_events() -> int:
@@ -5985,6 +6063,11 @@ func _drain_due_events() -> int:
 		if bool((inst as Dictionary).get("fired", false)):
 			continue
 		if int((inst as Dictionary).get("due", 0)) > now:
+			continue
+		var expire_m := int((inst as Dictionary).get("expire", 0))
+		if expire_m != 0 and now > expire_m:
+			inst["fired"] = true
+			_log_fact("event_expired", "expired", {"id": str(inst["id"]), "sid": int(inst["sid"])})
 			continue
 		inst["fired"] = true
 		# M2-01c：先结算，再按结果写不同种类的事实——取消/转移不算"真的发生过"

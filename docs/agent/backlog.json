@@ -313,7 +313,7 @@
                       "status":  "in_progress",
                       "owner":  null,
                       "evidence":  [
-                                       "docs/verification/M2-02a.md"
+                                       "docs/verification/M2-02a-queue.md"
                                    ],
                       "commit_sha":  null,
                       "remote_sha":  null,
