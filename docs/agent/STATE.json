@@ -10,8 +10,8 @@
     "game_code_modified":  false,
     "remote_mutations_performed":  true,
     "current_task":  "M2-01 事件定义/实例/校验",
-    "next_task":  "M3-01a 核心 NPC 独立生活（先做少量验证）",
-    "task_status":  "M2-05a-slice-done",
+    "next_task":  "M3-01b NPC 扩到 12 人",
+    "task_status":  "M3-01a-npc-done",
     "branch":  "agent/m2-m3",
     "base_sha":  "bf0846f1c20cbcf4dd0cf5f5707b0cf1c88e12cb",
     "commit_sha":  "07462f38d7b6b852c9bf6bf13cfc28ed232d1d73",
@@ -21,10 +21,10 @@
     "integrated_sha":  null,
     "blocked_reason":  "仍有限制：只有 Linux CI；数据文件无 schema 校验；无真人试玩。PR 已存在（#1, Draft），不再阻塞。",
     "evidence":  [
-                     "docs/verification/M2-04a-autonomy.md",
-                     "docs/verification/M2-05a-slice.md"
+                     "docs/verification/M2-05a-slice.md",
+                     "docs/verification/M3-01a-npc.md"
                  ],
-    "next_step":  "NPC 目标/状态/记忆/自主行动，先 3 人再扩到 12 人",
+    "next_step":  "把已验证机制扩到 12 名核心人物，并让行为影响世界",
     "playtest":  {
                      "baseline_sha":  "b50abd09f01a5664822f91d8101126ef4d09e89f",
                      "entry":  "playtest.bat（独立存档 浮生试玩） / play.bat（原存档 浮生）",

@@ -106,7 +106,7 @@ var month_frac := 0.0
 
 ## 存档格式版本：字段增删时递增，读档据此做迁移
 const ContentSchema := preload("res://scripts/core/content_schema.gd")
-const SAVE_SCHEMA_VERSION := 18
+const SAVE_SCHEMA_VERSION := 19
 var save_schema_seen := 0
 ## 读到更高版本的存档后置位：拒绝加载、拒绝覆盖
 var save_future := false
@@ -472,6 +472,7 @@ func _state_dict() -> Dictionary:
 		"time_scale": time_scale, "slot": slot, "month_frac": month_frac,
 	"boundary_log": boundary_log.duplicate(true), "player_build": (player_build as Dictionary).duplicate(true),
 	"child_pref": child_pref,
+	"npc_state": (npc_state as Dictionary).duplicate(true),
 	"apprentice_state": apprentice_state, "master_available": master_available,
 	"heirlooms": (heirlooms as Dictionary).duplicate(true),
 	"family_ill_pending": family_ill_pending, "ill_who": ill_who,
@@ -642,6 +643,9 @@ func _load_game() -> bool:
 	if d.get("boundary_log") is Array:
 		boundary_log = d["boundary_log"]
 	child_pref = str(d.get("child_pref", child_pref))
+	if d.get("npc_state") is Dictionary:
+		npc_state = d["npc_state"]
+	_npc_ensure()
 	apprentice_state = str(d.get("apprentice_state", apprentice_state))
 	master_available = bool(d.get("master_available", master_available))
 	if d.get("heirlooms") is Dictionary:
@@ -1040,6 +1044,12 @@ func _content_issues() -> Array:
 	return issues
 
 
+func _fact_exists(fid: int) -> bool:
+	for f in facts:
+		if int((f as Dictionary).get("fid", 0)) == fid:
+			return true
+	return false
+
 func _count_facts(kind: String) -> int:
 	var n := 0
 	for f in facts:
@@ -1111,6 +1121,7 @@ func _replay_snapshot() -> Dictionary:
 		"land": land, "merit": merit, "parents_alive": parents_alive,
 		"story": (story as Dictionary).duplicate(true),
 		"relations": (relations as Dictionary).duplicate(true),
+	"npc_state": (npc_state as Dictionary).duplicate(true),
 		"cooldown": (action_cooldown as Dictionary).duplicate(true),
 		"facts": (facts as Array).duplicate(true),
 		"pov_state": (pov_state as Dictionary).duplicate(true), "actor_vitals": (actor_vitals as Dictionary).duplicate(true), "event_instances": (event_instances as Array).duplicate(true), "event_seq": event_seq, "opp_last": (opp_last as Dictionary).duplicate(true),
@@ -1147,6 +1158,8 @@ func _replay_restore(snap: Dictionary) -> void:
 	parents_alive = int(snap["parents_alive"])
 	story = (snap["story"] as Dictionary).duplicate(true)
 	relations = (snap["relations"] as Dictionary).duplicate(true)
+	if snap.has("npc_state"):
+		npc_state = (snap["npc_state"] as Dictionary).duplicate(true)
 	action_cooldown = (snap["cooldown"] as Dictionary).duplicate(true)
 	facts = (snap["facts"] as Array).duplicate(true)
 	pov_state = (snap["pov_state"] as Dictionary).duplicate(true)
@@ -1259,6 +1272,8 @@ func _continuity_start(seed_value: int, scenario: String = "plain") -> void:
 	last_event_fid = 0
 	last_boundary_fid = 0
 	relations = {}
+	npc_state = {}
+	_npc_ensure()
 	action_cooldown = {}
 	parent_dead = {"father": false, "mother": false}
 	parent_death_year = {"father": 0, "mother": 0}
@@ -1376,6 +1391,7 @@ func _continuity_snapshot() -> Dictionary:
 		"actors": actors,
 		"household": {"parents_alive": parents_alive, "married": married, "children": children, "land": land},
 		"relations": (relations as Dictionary).duplicate(true),
+	"npc_state": (npc_state as Dictionary).duplicate(true),
 		"cooldown": (action_cooldown as Dictionary).duplicate(true),
 		"queue": (event_instances as Array).duplicate(true),
 		"event_seq": event_seq,
@@ -3266,6 +3282,66 @@ func _run_verify_smoke() -> void:
 		print("[VERIFY] FAIL m2_choice_divergence d12=", diff_12, " d18=", diff_18, " choices=", choices_ok, " facts=", facts_differ, " a12=", s12m.get("learning", 0.0), "/", l12m.get("learning", 0.0), " m18=", s18m.get("money", 0), "/", l18m.get("money", 0))
 	# 跑完整段后把世界恢复成干净起点，后面的用例各自有起点
 	_continuity_start(keep_slice05_seed)
+
+
+	# M3-01a：核心 NPC 独立生活——玩家不操作也会行动、留下记忆、改变世界
+	_continuity_start(4242, "plain")
+	var npc_facts_b0 := _count_facts("npc")
+	var wealth_b0 := money
+	var learning_b0 := learning
+	# 玩家什么都不做，只推进三年
+	for i in range(36):
+		_advance_months(1)
+	var npc_facts_b1 := _count_facts("npc")
+	var npc_moved_n: bool = npc_facts_b1 > npc_facts_b0
+	var world_npc_changed: bool = money != wealth_b0 or not is_equal_approx(learning, learning_b0)
+	# 三个核心 NPC 各有目标、各有记忆、记忆指向真实事实
+	var goals := {}
+	var remembered := 0
+	var memory_npc_ok := true
+	var bad_fid := 0
+	var bad_facts := 0
+	_npc_ensure()
+	for id in CORE_NPCS:
+		var who := str(id)
+		var st: Dictionary = npc_state.get(who, {})
+		goals[str(st.get("goal", ""))] = true
+		var mem: Array = st.get("memory", [])
+		if mem.size() > 0:
+			remembered += 1
+		for m in mem:
+			var fid := int((m as Dictionary).get("fid", 0))
+			if fid <= 0 or not _fact_exists(fid):
+				memory_npc_ok = false
+	var goals_npc_ok: bool = goals.size() >= 3
+	var memory_npc_count_ok: bool = remembered >= 2 and memory_npc_ok
+	# 态度差 → 明确拒绝，而不是沉默
+	var keep_att := int(relations.get("li_shen", 0))
+	relations["li_shen"] = -5
+	npc_state["li_shen"]["last_year"] = 0
+	var refuse_before := _count_facts("npc")
+	_npc_year_tick()
+	var refuse_after := _count_facts("npc")
+	var refused := false
+	for f in facts:
+		var fd: Dictionary = f
+		if str(fd.get("cause", "")) == "npc_li_shen_refuse":
+			refused = true
+	var refuse_npc_ok: bool = refused and refuse_after > refuse_before
+	relations["li_shen"] = keep_att
+	# 存读档保持 NPC 状态
+	var saved_mem := _npc_memory_of("wang_xiucai").size()
+	_save_game()
+	npc_state = {}
+	_load_game()
+	var npc_reload_n_ok: bool = not npc_state.is_empty() and _npc_memory_of("wang_xiucai").size() == saved_mem
+	var npc_ok: bool = npc_moved_n and world_npc_changed and goals_npc_ok and memory_npc_count_ok and refuse_npc_ok and npc_reload_n_ok
+	if npc_ok:
+		oks += 1
+		print("[VERIFY] PASS npc_independent_life facts=", npc_facts_b0, "->", npc_facts_b1, " remembered=", remembered, " goals=", goals.size(), " reload=", npc_reload_n_ok)
+	else:
+		fails.append("npc_independent_life")
+		print("[VERIFY] FAIL npc_independent_life moved=", npc_moved_n, " world=", world_npc_changed, " goals=", goals_npc_ok, " mem=", memory_npc_count_ok, " remembered=", remembered, " memok=", memory_npc_ok, " refuse=", refuse_npc_ok, " reload=", npc_reload_n_ok)
 
 
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
@@ -6394,6 +6470,8 @@ func _on_new_year() -> void:
 	_maybe_start_family_illness()
 	# 家人（含非当前视角的孩子）统一判死；当前视角的死留到 settle 之前按 death_active 处理
 	_kin_death_pass()
+	# M3-01a：核心 NPC 每年自主行动一次，不依赖玩家点击
+	_npc_year_tick()
 	if ended:
 		return
 	if health <= 0.0:
@@ -7002,6 +7080,153 @@ func _scene_ok(s: Dictionary) -> bool:
 		"preference":
 			return age >= 7 and age <= 12 and child_pref == "none"
 	return true
+
+
+## ------------------------------------------------------------------
+## M3-01a 核心 NPC 独立生活
+## 先做 3 人（李婶 / 王秀才 / 张屠户），每人有目标、态度、记忆与自主行动。
+## 行动不依赖玩家点击，并且真的改变世界（钱、识字、健康、关系、后续机会）。
+## ------------------------------------------------------------------
+
+const NPC_GOALS := {
+	"li_shen": "帮衬邻里",
+	"wang_xiucai": "教书糊口",
+	"zhang_tu": "做生意",
+	"wen_po": "接生看顾",
+	"li_zheng": "维持乡里",
+	"huo_lang": "走货赚钱",
+	"lao_seng": "守庙",
+	"you_yi": "行医",
+	"chuan_fu": "摆渡",
+	"lao_shu": "教蒙童",
+	"a_he": "帮家里干活",
+}
+
+const CORE_NPCS := ["li_shen", "wang_xiucai", "zhang_tu"]
+
+var npc_state: Dictionary = {}
+
+
+func _npc_init() -> void:
+	# 只在没有状态时初始化；读档会覆盖
+	npc_state = {}
+	for id in NPC_GOALS.keys():
+		var who := str(id)
+		npc_state[who] = {
+			"goal": str(NPC_GOALS[who]),
+			"attitude": int(relations.get(who, 0)),
+			"memory": [],
+			"last_year": 0,
+			"alive": true,
+			"wealth": 3,
+		}
+
+
+func _npc_ensure() -> void:
+	if npc_state.is_empty():
+		_npc_init()
+	for id in NPC_GOALS.keys():
+		var who := str(id)
+		if not npc_state.has(who):
+			npc_state[who] = {"goal": str(NPC_GOALS[who]), "attitude": int(relations.get(who, 0)),
+				"memory": [], "last_year": 0, "alive": true, "wealth": 3}
+
+
+func _npc_remember(who: String, text: String, fid: int) -> void:
+	_npc_ensure()
+	var st: Dictionary = npc_state[who]
+	var mem: Array = st.get("memory", [])
+	mem.append({"year": year, "fid": fid, "text": text})
+	if mem.size() > 12:
+		mem = mem.slice(mem.size() - 12)
+	st["memory"] = mem
+	npc_state[who] = st
+
+
+func _npc_year_tick() -> void:
+	# 每年一次：每个核心 NPC 按自己的目标和处境做一件事
+	if ended:
+		return
+	_npc_ensure()
+	for id in CORE_NPCS:
+		var who := str(id)
+		var st: Dictionary = npc_state[who]
+		if not bool(st.get("alive", true)):
+			continue
+		if int(st.get("last_year", -1)) == year:
+			continue
+		_npc_act(who, st)
+		st["last_year"] = year
+		npc_state[who] = st
+
+
+func _npc_act(who: String, st: Dictionary) -> void:
+	st["attitude"] = int(relations.get(who, int(st.get("attitude", 0))))
+	var attitude := int(st.get("attitude", 0))
+	# 态度太差：明确拒绝（不是随机不做）
+	if attitude <= -2:
+		var rf := _log_fact("npc", "npc_" + who + "_refuse", {"who": who, "goal": str(st.get("goal", ""))})
+		_npc_remember(who, "他没给你好脸色。", rf)
+		_toast(_npc_name(who) + "把门半掩上了。", Color(0.62, 0.24, 0.18))
+		return
+	match who:
+		"li_shen":
+			if money < 250 or health < 50.0:
+				money += 60
+				health = minf(100.0, health + 1.0)
+				var f := _log_fact("npc", "npc_li_shen_give", {"who": who, "money": 60})
+				_npc_remember(who, "你家揭不开锅，她送了一升米。", f)
+				_toast("李婶端了升米过来，说先吃着。", Color(0.30, 0.42, 0.22))
+				relations[who] = attitude + 1
+			else:
+				var f2 := _log_fact("npc", "npc_li_shen_chat", {"who": who})
+				_npc_remember(who, "她在门口跟你娘说了会儿话。", f2)
+		"wang_xiucai":
+			if learning >= 20.0 or bool(story.get("拜师", false)):
+				learning += 3.0
+				var f := _log_fact("npc", "npc_wang_xiucai_lend", {"who": who, "learning": 3})
+				_npc_remember(who, "他把一本旧书借给了你。", f)
+				_toast("王秀才把一本《千字文》递给你：别弄脏了。", Color(0.30, 0.42, 0.22))
+				relations[who] = attitude + 1
+			elif bool(story.get("没听家里的", false)):
+				var f2 := _log_fact("npc", "npc_wang_xiucai_warn", {"who": who})
+				_npc_remember(who, "他劝你还是听家里的话。", f2)
+			else:
+				var f3 := _log_fact("npc", "npc_wang_xiucai_read", {"who": who})
+				_npc_remember(who, "他在槐树下读了一下午书。", f3)
+		"zhang_tu":
+			if bool(story.get("欠债未还", false)):
+				relations[who] = attitude - 2
+				var f := _log_fact("npc", "npc_zhang_tu_refuse_credit", {"who": who})
+				_npc_remember(who, "他听说了你欠孙四的米，不肯赊账。", f)
+				_toast("张屠户把刀往案板上一拍：不赊。", Color(0.62, 0.24, 0.18))
+			elif money > 800:
+				money += 40
+				var f2 := _log_fact("npc", "npc_zhang_tu_trade", {"who": who, "money": 40})
+				_npc_remember(who, "他多切了二两肉给你。", f2)
+				relations[who] = attitude + 1
+			else:
+				var f3 := _log_fact("npc", "npc_zhang_tu_work", {"who": who})
+				_npc_remember(who, "他一早就在案板前忙。", f3)
+
+
+func _npc_name(who: String) -> String:
+	for n in npcs:
+		if str((n as Dictionary).get("id", "")) == who:
+			return str((n as Dictionary).get("name", who))
+	match who:
+		"li_shen":
+			return "李婶"
+		"wang_xiucai":
+			return "王秀才"
+		"zhang_tu":
+			return "张屠户"
+	return who
+
+
+func _npc_memory_of(who: String) -> Array:
+	_npc_ensure()
+	return (npc_state.get(who, {}) as Dictionary).get("memory", [])
 
 
 func _eligible_opportunities() -> Array:

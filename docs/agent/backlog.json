@@ -415,10 +415,10 @@
                                          "NPC会拒绝且行为可解释；同名不同ID不混淆",
                                          "人物死亡/迁移影响相关事件，回忆引用真实事实"
                                      ],
-                      "status":  "todo",
+                      "status":  "in_progress",
                       "owner":  null,
                       "evidence":  [
-
+                                       "docs/verification/M3-01a-npc.md"
                                    ],
                       "commit_sha":  null,
                       "remote_sha":  null,
