@@ -105,7 +105,7 @@ var women_rank := 0
 var month_frac := 0.0
 
 ## 存档格式版本：字段增删时递增，读档据此做迁移
-const SAVE_SCHEMA_VERSION := 8
+const SAVE_SCHEMA_VERSION := 9
 var save_schema_seen := 0
 ## 读到更高版本的存档后置位：拒绝加载、拒绝覆盖
 var save_future := false
@@ -408,6 +408,7 @@ func _state_dict() -> Dictionary:
 		"parent_dead": parent_dead, "parent_death_year": parent_death_year,
 		"action_cooldown": action_cooldown, "last_settled_year": last_settled_year,
 		"facts": facts, "relations": relations, "actor_vitals": actor_vitals,
+		"event_instances": event_instances, "event_seq": event_seq,
 		# RNG 的 64 位 seed/state 用十进制字符串，避免 JSON 精度丢失
 		"sim_seed": str(sim_seed),
 		"sim_state": str(rng_world.state), "rng_actor_state": str(rng_actor.state),
@@ -588,6 +589,9 @@ func _load_game() -> bool:
 			var ps2: Dictionary = pov_state[k]
 			actor_vitals[str(k)] = {"age": int(ps2.get("age", 0)), "health": float(ps2.get("health", 100.0)), "lifespan": int(ps2.get("lifespan", 100))}
 		actor_vitals["child"] = {"age": age, "health": health, "lifespan": lifespan}
+	if d.get("event_instances") is Array:
+		event_instances = d["event_instances"]
+	event_seq = int(d.get("event_seq", 0))
 	if d.has("sim_seed") and d.has("sim_state"):
 		sim_seed = int(str(d["sim_seed"]))
 		rng_world.seed = sim_seed
@@ -911,7 +915,7 @@ func _replay_snapshot() -> Dictionary:
 		"relations": (relations as Dictionary).duplicate(true),
 		"cooldown": (action_cooldown as Dictionary).duplicate(true),
 		"facts": (facts as Array).duplicate(true),
-		"pov_state": (pov_state as Dictionary).duplicate(true), "actor_vitals": (actor_vitals as Dictionary).duplicate(true),
+		"pov_state": (pov_state as Dictionary).duplicate(true), "actor_vitals": (actor_vitals as Dictionary).duplicate(true), "event_instances": (event_instances as Array).duplicate(true), "event_seq": event_seq,
 		"parent_dead": (parent_dead as Dictionary).duplicate(true),
 		"parent_death_year": (parent_death_year as Dictionary).duplicate(true),
 		"last_settled_year": last_settled_year,
@@ -949,6 +953,8 @@ func _replay_restore(snap: Dictionary) -> void:
 	facts = (snap["facts"] as Array).duplicate(true)
 	pov_state = (snap["pov_state"] as Dictionary).duplicate(true)
 	actor_vitals = (snap["actor_vitals"] as Dictionary).duplicate(true)
+	event_instances = (snap["event_instances"] as Array).duplicate(true)
+	event_seq = int(snap["event_seq"])
 	parent_dead = (snap["parent_dead"] as Dictionary).duplicate(true)
 	parent_death_year = (snap["parent_death_year"] as Dictionary).duplicate(true)
 	last_settled_year = int(snap["last_settled_year"])
@@ -1322,7 +1328,12 @@ func _run_verify_smoke() -> void:
 
 	# M1-03b：事实日志每条都要有类型与起因，时间不回退
 	facts = []
-	_apply_event("drought")
+	# 事件事实改由 _drain_due_events 记录，所以这里走完整的入队→到期路径
+	event_instances = []
+	event_seq = 0
+	_enqueue_event("drought", "year_end", _month_index())
+	_drain_due_events()
+	event_instances = []
 	_log_fact("exam", "test_cause", {"note": "x"})
 	var ok_facts := facts.size() >= 2
 	var last_t := -1
@@ -1617,6 +1628,37 @@ func _run_verify_smoke() -> void:
 	else:
 		fails.append("content_ids_valid")
 		print("[VERIFY] FAIL content_ids_valid ", c_issues)
+
+	# M2-01：事件实例——到期才触发，且只触发一次
+	event_instances = []
+	event_seq = 0
+	var keep_inst_age := age
+	age = 30
+	var sid_due := _enqueue_event("drought", "year_end", _month_index())
+	var sid_future := _enqueue_event("plague", "year_end", _month_index() + 3)
+	var fired_first := _drain_due_events()
+	var queue_after_first := event_instances.size()
+	var fired_again := _drain_due_events()
+	# 把未来的那条挪到现在，再抽一次
+	for inst in event_instances:
+		if int((inst as Dictionary).get("sid", 0)) == sid_future:
+			inst["due"] = _month_index()
+	var fired_third := _drain_due_events()
+	var fired_fourth := _drain_due_events()
+	var instance_ok: bool = (
+		fired_first == 1 and queue_after_first == 1
+		and fired_again == 0 and fired_third == 1 and fired_fourth == 0
+		and sid_due != sid_future and event_instances.is_empty()
+	)
+	if instance_ok:
+		oks += 1
+		print("[VERIFY] PASS event_instance_drained_once fired=", fired_first, "/", fired_again, "/", fired_third, "/", fired_fourth)
+	else:
+		fails.append("event_instance_drained_once")
+		print("[VERIFY] FAIL event_instance_drained_once ", fired_first, " ", fired_again, " ", fired_third, " ", fired_fourth, " left=", event_instances.size())
+	event_instances = []
+	event_seq = 0
+	age = keep_inst_age
 
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
@@ -4779,6 +4821,39 @@ func _pick_from(pool: Array) -> Dictionary:
 	return pool[_rndi(0, pool.size() - 1)]
 
 
+## M2-01：事件实例。定义（EVENTS）与实例（event_instances）分开，
+## 实例带到期月份与来源，M2-02 的调度器可以直接排它。
+var event_instances: Array = []
+var event_seq := 0
+
+
+func _enqueue_event(id: String, cause: String, due_month: int) -> int:
+	event_seq += 1
+	event_instances.append({"sid": event_seq, "id": id, "cause": cause, "due": due_month, "fired": false})
+	return event_seq
+
+
+func _drain_due_events() -> int:
+	# 到期即触发，且每个实例只触发一次；来源写进事实日志的 cause
+	var fired := 0
+	var now := _month_index()
+	for inst in event_instances:
+		if bool((inst as Dictionary).get("fired", false)):
+			continue
+		if int((inst as Dictionary).get("due", 0)) > now:
+			continue
+		inst["fired"] = true
+		_log_fact("event", str(inst.get("cause", "unknown")), {"id": str(inst["id"]), "sid": int(inst["sid"])})
+		_apply_event(str(inst["id"]))
+		fired += 1
+	var alive_list: Array = []
+	for inst in event_instances:
+		if not bool((inst as Dictionary).get("fired", false)):
+			alive_list.append(inst)
+	event_instances = alive_list.slice(maxi(0, alive_list.size() - 64))
+	return fired
+
+
 func _roll_event() -> void:
 	if not events_enabled:
 		return
@@ -4791,11 +4866,12 @@ func _roll_event() -> void:
 	if pool.is_empty():
 		return
 	var ev: Dictionary = _pick_from(pool)
-	_apply_event(str(ev["id"]))
+	_enqueue_event(str(ev["id"]), "year_end", _month_index())
+	_drain_due_events()
 
 
 func _apply_event(id: String) -> void:
-	_log_fact("event", "year_end", {"id": id})
+	# 事实日志由 _drain_due_events 记录（带实例 sid 与来源）
 	var bad := Color(0.62, 0.24, 0.18)
 	var good := Color(0.30, 0.42, 0.22)
 	match id:

@@ -9,9 +9,9 @@
     "godot_run":  "import_only",
     "game_code_modified":  false,
     "remote_mutations_performed":  true,
-    "current_task":  "M2-01 前置：内容校验",
+    "current_task":  "M2-01",
     "next_task":  "M1-04",
-    "task_status":  "content-validation-pushed",
+    "task_status":  "M2-01a-pushed",
     "branch":  "16 个 agent/* 堆叠分支（见 docs/DELIVERY_M1.md）",
     "base_sha":  "bf0846f1c20cbcf4dd0cf5f5707b0cf1c88e12cb",
     "commit_sha":  "4466c07634746641983a8522d06997e3b5e61d03",
@@ -24,5 +24,5 @@
                      "docs/BASELINE.md",
                      "docs/tasks/M0-01.md"
                  ],
-    "next_step":  "M2-01 事件定义与实例协议；或 M1-05 剩余 UI 写路径审计"
+    "next_step":  "M2-02 到期队列与机会调度（复用 event_instances）"
 }
