@@ -11,18 +11,18 @@
     "remote_mutations_performed":  true,
     "current_task":  "M1-05 跨进程续跑",
     "next_task":  "M1-05 续跑：其余场景与产物级反向验证",
-    "task_status":  "M1-05d-four-scenarios-green",
+    "task_status":  "stage-review-ready",
     "branch":  "agent/M1-ci-workflow",
     "base_sha":  "bf0846f1c20cbcf4dd0cf5f5707b0cf1c88e12cb",
-    "commit_sha":  "dd9e9fd7efe280a0c2d33da395d74423a7396584",
-    "remote_sha":  "dd9e9fd7efe280a0c2d33da395d74423a7396584",
+    "commit_sha":  "9c86ac7a1c4b024279af05e1792a721a9713082c",
+    "remote_sha":  "9c86ac7a1c4b024279af05e1792a721a9713082c",
     "pr_url":  "https://github.com/nicojiong/Life/pull/1",
-    "ci_status":  "green: isolated-smoke + continuity 两个 job 均 success (dd9e9fd)",
+    "ci_status":  "green: isolated-smoke + continuity 均 success (9c86ac7)",
     "integrated_sha":  null,
     "blocked_reason":  "仍有限制：只有 Linux CI；数据文件无 schema 校验；无真人试玩。PR 已存在（#1, Draft），不再阻塞。",
     "evidence":  [
-                     "docs/verification/M1-05c.md",
-                     "docs/verification/M1-05d.md"
+                     "docs/verification/M1-05d.md",
+                     "docs/REVIEW_M1.md"
                  ],
-    "next_step":  "阶段集成评审；随后借米因果链"
+    "next_step":  "结束 PR Draft 并合并审查；合并后 integrated_sha = 实际 merge SHA"
 }

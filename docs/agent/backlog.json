@@ -259,7 +259,9 @@
                       "evidence":  [
                                        "docs/verification/M1-05.md",
                                        "docs/verification/M1-05b.md",
-                                       "docs/tasks/M1-05.md"
+                                       "docs/verification/M1-05c.md",
+                                       "docs/verification/M1-05d.md",
+                                       "docs/REVIEW_M1.md"
                                    ],
                       "commit_sha":  null,
                       "remote_sha":  null,
