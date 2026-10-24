@@ -11,7 +11,7 @@
     "remote_mutations_performed":  true,
     "current_task":  "M3-01",
     "next_task":  "M1-04",
-    "task_status":  "M3-02a-pushed",
+    "task_status":  "M3-03-pushed",
     "branch":  "16 个 agent/* 堆叠分支（见 docs/DELIVERY_M1.md）",
     "base_sha":  "bf0846f1c20cbcf4dd0cf5f5707b0cf1c88e12cb",
     "commit_sha":  "4466c07634746641983a8522d06997e3b5e61d03",
@@ -24,5 +24,5 @@
                      "docs/BASELINE.md",
                      "docs/tasks/M0-01.md"
                  ],
-    "next_step":  "清掉 _apply_event 里被数据接管的死分支；最终交付"
+    "next_step":  "开 PR 并合并；M3 继续把节令/童年文案数据化；补 data schema 校验；真人试玩"
 }

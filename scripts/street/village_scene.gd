@@ -5320,7 +5320,7 @@ func _apply_event_effects(def: Dictionary) -> void:
 
 
 func _apply_event(id: String) -> void:
-	# M3-02：有 effects 的事件由数据驱动；没有的（疫/丰年要按状态算）仍走下面的代码
+	# M3-03：能用数据描述的事件都走 _apply_event_effects；只有需要按状态计算的留在这里
 	var def := DB.event_def(id)
 	if def.has("effects"):
 		_apply_event_effects(def)
@@ -5328,63 +5328,23 @@ func _apply_event(id: String) -> void:
 	var bad := Color(0.62, 0.24, 0.18)
 	var good := Color(0.30, 0.42, 0.22)
 	match id:
-		"drought":
-			money = maxi(0, money - 700)
-			health = maxf(0.0, health - 3.0)
-			_toast("春旱，河断了流。粮价涨了三成，家里先紧着吃。", bad)
-		"flood":
-			money = maxi(0, money - 900)
-			_toast("夏水暴涨，冲了低处的田。修堤又摊了一笔钱。", bad)
-		"levy":
-			money = maxi(0, money - 500)
-			fame = maxf(0.0, fame - 1.0)
-			_toast("官府加派杂税，里正挨家收钱。", bad)
-		"thieves":
-			money = maxi(0, money - 600)
-			health = maxf(0.0, health - 2.0)
-			_toast("夜里进了贼，翻走了箱底的现钱。", bad)
 		"plague":
+			# 按医者等级分档，数据表达不了
 			if med_rank >= 3:
 				health = maxf(0.0, health - 2.0)
 				_toast("疫气进了村。你懂医，早早闭门煮药，只病了一场小的。", good)
 			else:
 				health = maxf(0.0, health - 7.0)
 				_toast("疫气进了村，你躺了两个月，差点没起来。", bad)
-		"suit":
-			money = maxi(0, money - 800)
-			fame = maxf(0.0, fame - 2.0)
-			_toast("被人告了一状，赔钱不说，还落了个不是。", bad)
-		"wedding":
-			money = maxi(0, money - 300)
-			fame = minf(100.0, fame + 3.0)
-			_toast("邻家嫁女，随了三百文的礼。席上吃了两碗。", good)
 		"harvest":
+			# 收益按田亩算，数据表达不了
 			var gain := maxi(300, land * 60)
 			money += gain
 			_toast("今年风调雨顺，田里多收了 %d 文。" % gain, good)
-		"reward":
-			money += 1200
-			fame = minf(100.0, fame + 8.0)
-			_toast("县里旌表善行，赏了一千二百文。", good)
-		"school":
-			money = maxi(0, money - 500)
-			fame = minf(100.0, fame + 2.0)
-			_toast("孩子到了开蒙的年纪，束脩又是一笔。", bad)
-		"rash":
-			health = maxf(0.0, health - 3.0)
-			story["出疹子"] = true
-			_toast("你出了一身疹子，母亲守了三夜，用凉水给你擦身。", bad)
-		"riverfall":
-			health = maxf(0.0, health - 2.0)
-			fame = minf(100.0, fame + 1.0)
-			story["落水"] = true
-			_toast("你掉进河里，被撑船的捞了上来。母亲抱着你哭了很久。", bad)
-		"find_coin":
-			money += 50
-			_toast("你在墙根下捡到一枚铜钱，攥了一天，最后还是交给了母亲。", good)
-		"quarrel":
-			fame = maxf(0.0, fame - 1.0)
-			_toast("邻家孩子抢了你的糖，你俩在泥地里滚成一团。", bad)
+		_:
+			push_warning("[EVENT] 没有实现也没有 effects: " + id)
+
+
 
 
 func _die_young() -> void:
