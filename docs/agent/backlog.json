@@ -496,10 +496,10 @@
                                          "拒绝关系或无子女人生可继续",
                                          "家庭变化依据person状态与时代规则，文案演员正确"
                                      ],
-                      "status":  "todo",
+                      "status":  "in_progress",
                       "owner":  null,
                       "evidence":  [
-
+                                       "docs/verification/M3-03a-family-state.md"
                                    ],
                       "commit_sha":  null,
                       "remote_sha":  null,

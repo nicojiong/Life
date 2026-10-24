@@ -106,7 +106,7 @@ var month_frac := 0.0
 
 ## 存档格式版本：字段增删时递增，读档据此做迁移
 const ContentSchema := preload("res://scripts/core/content_schema.gd")
-const SAVE_SCHEMA_VERSION := 20
+const SAVE_SCHEMA_VERSION := 21
 var save_schema_seen := 0
 ## 读到更高版本的存档后置位：拒绝加载、拒绝覆盖
 var save_future := false
@@ -284,6 +284,7 @@ const YEAR_SCENES := [
 	{"m": 2, "id": "bing", "name": "卧病", "cond": "ill"},
 	{"m": 4, "id": "bai_shi", "name": "拜师", "cond": "apprentice"},
 	{"m": 3, "id": "kai_meng", "name": "开蒙", "cond": "preference"},
+	{"m": 5, "id": "ti_qin", "name": "提亲", "cond": "marriage"},
 ]
 var scenes_done := {}
 
@@ -296,6 +297,14 @@ const SCENE_OPTS := {
 		 "text": "你只肯借一斗。孙四笑了笑，说少借点也好。"},
 		{"id": "refuse", "label": "咬牙不借", "gain": {"fame": 1},
 		 "text": "你把裤腰带又紧了一扣，没去敲孙四的门。"},
+	],
+	"ti_qin": [
+		{"id": "accept", "label": "应下这门亲", "gain": {},
+		 "text": "你点了头。周家送来两匹布，母亲开始张罗。"},
+		{"id": "defer", "label": "再等两年", "gain": {},
+		 "text": "你说手头还紧，过两年再说。"},
+		{"id": "refuse", "label": "回掉这门亲", "gain": {},
+		 "text": "你把话说明白了。媒人走的时候脸色不太好看。"},
 	],
 	"kai_meng": [
 		{"id": "study", "label": "想读书", "gain": {},
@@ -474,6 +483,8 @@ func _state_dict() -> Dictionary:
 	"child_pref": child_pref,
 	"npc_state": (npc_state as Dictionary).duplicate(true),
 	"npc_log": (npc_log as Array).duplicate(true), "npc_seq": npc_seq,
+	"marriage_pending": marriage_pending, "marriage_refused": marriage_refused,
+	"marriage_wait_until": marriage_wait_until,
 	"apprentice_state": apprentice_state, "master_available": master_available,
 	"heirlooms": (heirlooms as Dictionary).duplicate(true),
 	"family_ill_pending": family_ill_pending, "ill_who": ill_who,
@@ -655,6 +666,9 @@ func _load_game() -> bool:
 	if d.get("heirlooms") is Dictionary:
 		heirlooms = d["heirlooms"]
 	family_ill_pending = bool(d.get("family_ill_pending", family_ill_pending))
+	marriage_pending = bool(d.get("marriage_pending", marriage_pending))
+	marriage_refused = bool(d.get("marriage_refused", marriage_refused))
+	marriage_wait_until = int(d.get("marriage_wait_until", marriage_wait_until))
 	ill_who = str(d.get("ill_who", ill_who))
 	debt_units = int(d.get("debt_units", debt_units))
 	debt_due = int(d.get("debt_due", debt_due))
@@ -1127,6 +1141,8 @@ func _replay_snapshot() -> Dictionary:
 		"relations": (relations as Dictionary).duplicate(true),
 	"npc_state": (npc_state as Dictionary).duplicate(true),
 	"npc_log": (npc_log as Array).duplicate(true), "npc_seq": npc_seq,
+	"marriage_pending": marriage_pending, "marriage_refused": marriage_refused,
+	"marriage_wait_until": marriage_wait_until,
 		"cooldown": (action_cooldown as Dictionary).duplicate(true),
 		"facts": (facts as Array).duplicate(true),
 		"pov_state": (pov_state as Dictionary).duplicate(true), "actor_vitals": (actor_vitals as Dictionary).duplicate(true), "event_instances": (event_instances as Array).duplicate(true), "event_seq": event_seq, "opp_last": (opp_last as Dictionary).duplicate(true),
@@ -1511,6 +1527,8 @@ func _continuity_snapshot() -> Dictionary:
 		"relations": (relations as Dictionary).duplicate(true),
 	"npc_state": (npc_state as Dictionary).duplicate(true),
 	"npc_log": (npc_log as Array).duplicate(true), "npc_seq": npc_seq,
+	"marriage_pending": marriage_pending, "marriage_refused": marriage_refused,
+	"marriage_wait_until": marriage_wait_until,
 		"cooldown": (action_cooldown as Dictionary).duplicate(true),
 		"queue": (event_instances as Array).duplicate(true),
 		"event_seq": event_seq,
@@ -1537,7 +1555,9 @@ func _continuity_snapshot() -> Dictionary:
 		"child_pref": child_pref,
 	"apprentice_state": apprentice_state, "master_available": master_available,
 	"heirlooms": (heirlooms as Dictionary).duplicate(true),
-		"family": {"ill_pending": family_ill_pending, "ill_who": ill_who},
+		"family": {"ill_pending": family_ill_pending, "ill_who": ill_who,
+			"marriage_pending": marriage_pending, "marriage_refused": marriage_refused,
+			"wait_until": marriage_wait_until},
 	}
 
 
@@ -3442,6 +3462,8 @@ func _run_verify_smoke() -> void:
 	npc_state["li_shen"]["last_year"] = 0
 	var refuse_before := npc_log.size()
 	_npc_year_tick()
+	# M3-03：婚配与子女按家境/婚育/健康发生，不再按固定年龄
+	_family_year_tick()
 	var refuse_after := npc_log.size()
 	var refused := false
 	for f in npc_log:
@@ -3489,6 +3511,83 @@ func _run_verify_smoke() -> void:
 		fails.append("m3_routes_walkable")
 		print("[VERIFY] FAIL m3_routes_walkable study=", r_study["age"], " craft=", r_craft["age"], " care=", r_care["age"], " marks=", study_mark, "/", craft_mark, "/", care_mark, " facts=", facts_ok, " differ=", routes_differ, " s=", r_study, " c=", r_craft, " ca=", r_care)
 	_continuity_start(4242, "plain")
+
+
+	# M3-03：家庭变化由状态驱动——提亲看条件、拒绝可继续、父母死亡只按健康与寿数
+	var fmx_money := money
+	var fmx_married := married
+	var fmx_children := children
+	var fmx_pending := marriage_pending
+	var fmx_refused := marriage_refused
+	var fmx_wait := marriage_wait_until
+	var fmx_story: Dictionary = (story as Dictionary).duplicate(true)
+	var fmx_facts: Array = (facts as Array).duplicate(true)
+	if pov != "child":
+		_switch_pov("child")
+	ended = false
+	age = 20
+	money = 100
+	married = false
+	children = 0
+	marriage_pending = false
+	marriage_refused = false
+	marriage_wait_until = 0
+	story.erase("married")
+	story.erase("拒婚")
+	_family_year_tick()
+	var fmx_poor: bool = not marriage_pending
+	money = 800
+	_family_year_tick()
+	var fmx_offer: bool = marriage_pending
+	_marry_accept()
+	var fmx_accept: bool = married
+	for i in range(20):
+		age += 2
+		_family_year_tick()
+	var fmx_child: bool = children >= 1
+	married = false
+	children = 0
+	marriage_pending = false
+	marriage_refused = false
+	money = 800
+	age = 22
+	_family_year_tick()
+	_marry_refuse()
+	_family_year_tick()
+	var fmx_refuse: bool = marriage_refused and not marriage_pending and bool(story.get("拒婚", false))
+	parent_dead["father"] = false
+	parent_dead["mother"] = false
+	parents_alive = 2
+	age = 46
+	_family_year_tick()
+	var fmx_orphan: bool = not milestones.has("orphan") and parents_alive == 2
+	married = true
+	children = 1
+	marriage_refused = false
+	marriage_pending = false
+	_save_game()
+	married = false
+	children = 0
+	_load_game()
+	var fmx_reload: bool = married and children == 1
+	var fmx_ok: bool = fmx_poor and fmx_offer and fmx_accept and fmx_child and fmx_refuse and fmx_orphan and fmx_reload
+	money = fmx_money
+	married = fmx_married
+	children = fmx_children
+	marriage_pending = fmx_pending
+	marriage_refused = fmx_refused
+	marriage_wait_until = fmx_wait
+	story = fmx_story
+	facts = fmx_facts
+	fact_seq = fmx_facts.size()
+	if pov != "child":
+		_switch_pov("child")
+	if fmx_ok:
+		oks += 1
+		print("[VERIFY] PASS family_by_state poor=", fmx_poor, " offer=", fmx_offer, " child=", fmx_child, " refuse=", fmx_refuse, " orphan=", fmx_orphan, " reload=", fmx_reload)
+	else:
+		fails.append("family_by_state")
+		print("[VERIFY] FAIL family_by_state poor=", fmx_poor, " offer=", fmx_offer, " accept=", fmx_accept, " child=", fmx_child, " refuse=", fmx_refuse, " orphan=", fmx_orphan, " reload=", fmx_reload)
 
 
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
@@ -4232,6 +4331,18 @@ func _pick_scene_option(sid: String, oid: String) -> void:
 		var jump0 := _scene_months_to_next()
 		if jump0 > 0:
 			_advance_months(jump0)
+		Sfx.play("ok")
+		_save_game()
+		return
+	if sid == "ti_qin":
+		match oid:
+			"accept":
+				_marry_accept()
+			"defer":
+				_marry_defer()
+			"refuse":
+				_marry_refuse()
+		scenes_done["%d_%s" % [year, sid]] = true
 		Sfx.play("ok")
 		_save_game()
 		return
@@ -6621,6 +6732,8 @@ func _on_new_year() -> void:
 	_kin_death_pass()
 	# M3-01a：核心 NPC 每年自主行动一次，不依赖玩家点击
 	_npc_year_tick()
+	# M3-03：婚配与子女按家境/婚育/健康发生，不再按固定年龄
+	_family_year_tick()
 	if ended:
 		return
 	if health <= 0.0:
@@ -6726,30 +6839,6 @@ func _on_new_year() -> void:
 	else:
 		_roll_event()
 	boundary_log.append("events")
-	# 生子
-	if age == 30 and married and children == 0 and not milestones.has("child1"):
-		milestones["child1"] = true
-		children += 1
-		money = maxi(0, money - 800)
-		_play_cutscene("得 子", [
-			"妻子临盆那夜，你在院里走到天亮。",
-			"稳婆出来说：是个儿子。",
-			"你抱他时手在抖，像抱一件借来的东西。",
-		], false)
-	elif age == 34 and married and children == 1 and not milestones.has("child2"):
-		milestones["child2"] = true
-		children += 1
-		_toast("又添了一个孩子，屋里更挤了。", Color(0.42, 0.34, 0.22))
-	# 丧亲
-	if age == 46 and parents_alive > 0 and not milestones.has("orphan"):
-		milestones["orphan"] = true
-		parents_alive = 0
-		health = maxf(0.0, health - 2.0)
-		_play_cutscene("丧 亲", [
-			"母亲是冬天走的，走的时候你在外头。",
-			"回来时，灵堂已经摆好了。",
-			"父亲坐在门槛上，一句话也不说。",
-		], false)
 	# 抱孙
 	if age == 62 and children > 0 and not milestones.has("grandchild"):
 		milestones["grandchild"] = true
@@ -7228,6 +7317,8 @@ func _scene_ok(s: Dictionary) -> bool:
 			return _can_ask_apprentice()
 		"preference":
 			return age >= 7 and age <= 12 and child_pref == "none"
+		"marriage":
+			return marriage_pending and not married and not marriage_refused
 	return true
 
 
@@ -7439,6 +7530,60 @@ func _npc_name(who: String) -> String:
 func _npc_memory_of(who: String) -> Array:
 	_npc_ensure()
 	return (npc_state.get(who, {}) as Dictionary).get("memory", [])
+
+
+
+
+
+## ------------------------------------------------------------------
+## M3-03 家庭变化按人物状态发生
+## 婚配看家境与意愿，子女看成家与健康；父母死亡已在年边界按健康与寿数处理。
+## ------------------------------------------------------------------
+
+var marriage_pending := false
+var marriage_refused := false
+var marriage_wait_until := 0
+
+
+func _family_year_tick() -> void:
+	if ended:
+		return
+	if not married and not marriage_refused and not marriage_pending:
+		if age >= 18 and age >= marriage_wait_until and money >= 400:
+			marriage_pending = true
+			_log_fact("family", "marriage_offer", {"age": age, "money": money})
+			_toast("邻村周家托人来问，说想结这门亲。", Color(0.48, 0.32, 0.16))
+	if married and children < 4 and age < 42 and health > 40.0:
+		if _arnd() < 0.22:
+			children += 1
+			_log_fact("family", "child_born", {"children": children, "age": age})
+			_toast("家里添了一个孩子。", Color(0.42, 0.34, 0.22))
+
+
+func _marry_accept() -> void:
+	married = true
+	spouse_name = "周氏"
+	story["married"] = true
+	marriage_pending = false
+	money = maxi(0, money - 200)
+	_log_fact("family", "married", {"spouse": spouse_name, "age": age})
+	_toast("你成了家。周氏进门那天，母亲把灶台擦了三遍。", Color(0.30, 0.42, 0.22))
+
+
+func _marry_defer() -> void:
+	marriage_pending = false
+	marriage_wait_until = age + 2
+	story["再等等"] = true
+	_log_fact("family", "marriage_deferred", {"age": age})
+	_toast("你说再等等。媒人走后，母亲叹了口气。", Color(0.48, 0.32, 0.16))
+
+
+func _marry_refuse() -> void:
+	marriage_pending = false
+	marriage_refused = true
+	story["拒婚"] = true
+	_log_fact("family", "marriage_refused", {"age": age})
+	_toast("你把这门亲回了。村里说了几天闲话，日子照过。", Color(0.62, 0.24, 0.18))
 
 
 func _eligible_opportunities() -> Array:
