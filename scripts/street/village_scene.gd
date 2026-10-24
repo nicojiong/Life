@@ -2075,6 +2075,50 @@ func _run_verify_smoke() -> void:
 		fails.append("old_save_pov_migration")
 		print("[VERIFY] FAIL old_save_pov_migration ", pov_detail)
 
+	# M2-10：所有死亡入口统一——父母死登记在本人名下，孩子继续；孩子死才结束整局
+	var keep_dead_f := bool(parent_dead.get("father", false))
+	var keep_dead_m := bool(parent_dead.get("mother", false))
+	var keep_death_cause := death_cause
+	parent_dead["father"] = false
+	parent_dead["mother"] = false
+	parents_alive = 2
+	ended = false
+	if pov != "child":
+		_switch_pov("child")
+	# 1) 父亲视角下战死：登记父亲，孩子继续
+	_switch_pov("father")
+	age = 30
+	_die_young()
+	var father_died: bool = bool(parent_dead.get("father", false)) and not ended and pov == "child"
+	var cause_after_war := death_cause
+	# 2) 母亲视角下寿终：同样登记母亲，不结束整局
+	_switch_pov("mother")
+	age = 70
+	lifespan = 70
+	_trigger_actor_end()
+	var mother_died: bool = bool(parent_dead.get("mother", false)) and not ended and pov == "child"
+	# 3) 孩子自己寿终：这一局才结束
+	if pov != "child":
+		_switch_pov("child")
+	age = 70
+	lifespan = 70
+	_trigger_actor_end()
+	var child_ended: bool = ended
+	var death_ok: bool = father_died and mother_died and child_ended and cause_after_war == "战死"
+	if death_ok:
+		oks += 1
+		print("[VERIFY] PASS death_unified cause=", cause_after_war, " child_ended=", child_ended)
+	else:
+		fails.append("death_unified")
+		print("[VERIFY] FAIL death_unified father=", father_died, " mother=", mother_died, " child=", child_ended, " cause=", cause_after_war)
+	ended = false
+	parent_dead["father"] = keep_dead_f
+	parent_dead["mother"] = keep_dead_m
+	death_cause = keep_death_cause
+	parents_alive = 2
+	if pov != "child":
+		_switch_pov("child")
+
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
 	var keep_age := age
@@ -5015,14 +5059,20 @@ func _apply_special(s: String) -> void:
 
 # ---------------------------------------------------------------- 时间
 
-func _trigger_actor_end() -> void:
-	# A01：人生结束只触发一次；当前控制谁，就结束谁的人生
+func _kill_current_actor(cause: String) -> void:
+	# 唯一死亡入口：时间推进、行动/对话/事件效果、战死都走这里
+	# 孩子死 = 整局结束；父母死 = 登记在本人名下，孩子继续过
 	if ended:
 		return
+	death_cause = cause
 	if pov == "child":
 		_ending()
 	else:
 		_parent_death()
+
+
+func _trigger_actor_end() -> void:
+	_kill_current_actor("寿终")
 
 
 func _advance_months(n: int) -> void:
@@ -5419,7 +5469,7 @@ func _apply_event(id: String) -> void:
 func _die_young() -> void:
 	health = 0.0
 	lifespan = age
-	_ending()
+	_kill_current_actor("战死")
 
 
 func _ending() -> void:
