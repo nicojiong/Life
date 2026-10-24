@@ -12,8 +12,8 @@
     "current_task":  "M1-04",
     "next_task":  "M1-04",
     "task_status":  "in_progress",
-    "branch":  "agent/M1-04a-save-fields",
-    "base_sha":  "b69eab73d73965dfefda4224c8fb7c5da34bb5bd",
+    "branch":  "agent/M1-04b-dead-parent",
+    "base_sha":  "1788fe87772950d839ecb00d0a25f153e9764e1b",
     "commit_sha":  "07fbe20d45fa6d8ce4c9ff0914471a74b2a92401",
     "remote_sha":  "07fbe20d45fa6d8ce4c9ff0914471a74b2a92401",
     "pr_url":  null,
@@ -24,5 +24,5 @@
                      "docs/BASELINE.md",
                      "docs/tasks/M0-01.md"
                  ],
-    "next_step":  "推送后记录 SHA；下一片 M1-04b：死亡与缺字段分离（A03）"
+    "next_step":  "推送后记录 SHA；下一片 M1-04c：原子写入与备份"
 }

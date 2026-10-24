@@ -107,6 +107,9 @@ var month_frac := 0.0
 ## 存档格式版本：字段增删时递增，读档据此做迁移
 const SAVE_SCHEMA_VERSION := 2
 var save_schema_seen := 0
+## A03：父母是否已故（保留人物记录，不用删除表示死亡）
+var parent_dead := {"father": false, "mother": false}
+var parent_death_year := {"father": 0, "mother": 0}
 
 var _re_time := RegEx.new()
 
@@ -325,6 +328,7 @@ func _state_dict() -> Dictionary:
 		"father_trade": father_trade, "mother_temper": mother_temper,
 		"women_rank": women_rank, "scenes_done": scenes_done, "child_last": child_last,
 		"time_scale": time_scale, "slot": slot,
+		"parent_dead": parent_dead, "parent_death_year": parent_death_year,
 		"px": player.x, "py": player.y, "hour": hour,
 		"birth_year": birth_year, "father_name": father_name, "mother_name": mother_name,
 	}
@@ -401,13 +405,15 @@ func _load_game() -> bool:
 		for k in ps.keys():
 			if ps[k] is Dictionary:
 				pov_state[str(k)] = ps[k]
-	# 老存档没有父母数据时补上，不然门口会少两个人
-	var rr := RandomNumberGenerator.new()
-	rr.randomize()
-	if not pov_state.has("father"):
-		pov_state["father"] = _make_parent("father", rr)
-	if not pov_state.has("mother"):
-		pov_state["mother"] = _make_parent("mother", rr)
+	# 老存档（schema < 2）没有父母数据时补上，不然门口会少两个人；
+	# 新存档不补：缺人物只可能意味着已故，按死亡记录处理，不能复活。
+	if int(d.get("schema_version", 1)) < 2:
+		var rr := RandomNumberGenerator.new()
+		rr.randomize()
+		if not pov_state.has("father"):
+			pov_state["father"] = _make_parent("father", rr)
+		if not pov_state.has("mother"):
+			pov_state["mother"] = _make_parent("mother", rr)
 	office_rank = int(d.get("office_rank", office_rank))
 	gov_merit = int(d.get("gov_merit", gov_merit))
 	scandal = int(d.get("scandal", scandal))
@@ -429,6 +435,14 @@ func _load_game() -> bool:
 		scenes_done = d["scenes_done"]
 	child_last = str(d.get("child_last", child_last))
 	time_scale = float(d.get("time_scale", time_scale))
+	if d.get("parent_dead") is Dictionary:
+		var pd: Dictionary = d["parent_dead"]
+		for k in pd.keys():
+			parent_dead[str(k)] = bool(pd[k])
+	if d.get("parent_death_year") is Dictionary:
+		var py: Dictionary = d["parent_death_year"]
+		for k in py.keys():
+			parent_death_year[str(k)] = int(py[k])
 	save_schema_seen = int(d.get("schema_version", 1))
 	return true
 
@@ -789,6 +803,27 @@ func _run_verify_smoke() -> void:
 	child_last = str(keep["cl"])
 	time_scale = float(keep["ts"])
 	scenes_done = (keep["sd"] as Dictionary).duplicate(true)
+
+	# A03：已故父母不能因为读档被复活
+	parent_dead["father"] = true
+	parent_death_year["father"] = 1050
+	_save_game()
+	parent_dead["father"] = false
+	parent_death_year["father"] = 0
+	var ok_dead := _load_game()
+	var pov_before := pov
+	_switch_pov("father")
+	if ok_dead and bool(parent_dead["father"]) and int(parent_death_year["father"]) == 1050 \
+			and pov == "child" and pov_state.has("father"):
+		oks += 1
+		print("[VERIFY] PASS dead_parent_stays_dead")
+	else:
+		fails.append("dead_parent_stays_dead")
+		print("[VERIFY] FAIL dead_parent_stays_dead ok=", ok_dead, " dead=", parent_dead,
+			" pov=", pov, " has=", pov_state.has("father"))
+	parent_dead["father"] = false
+	parent_death_year["father"] = 0
+	pov = pov_before
 
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
@@ -1291,7 +1326,7 @@ func _pov_npc_id() -> String:
 func _switch_pov(who: String) -> void:
 	if who == pov or ended:
 		return
-	if who != "child" and not pov_state.has(who):
+	if who != "child" and (not pov_state.has(who) or bool(parent_dead.get(who, false))):
 		return
 	var from_pos := player
 	pov_state[pov] = _capture_pov()
@@ -1352,7 +1387,7 @@ func _refresh_pov_bar() -> void:
 	for i in range(pov_btns.size()):
 		var who := str(ids[i])
 		var b: Button = pov_btns[i]
-		var alive := who == "child" or pov_state.has(who)
+		var alive := who == "child" or not bool(parent_dead.get(who, false))
 		b.visible = alive
 		if not alive:
 			continue
@@ -2106,7 +2141,7 @@ func _spawn_npcs() -> void:
 		var cc: Dictionary = c
 		if str(cc["id"]) == pov:
 			continue
-		if str(cc["id"]) in ["father", "mother"] and not pov_state.has(str(cc["id"])):
+		if str(cc["id"]) in ["father", "mother"] and bool(parent_dead.get(str(cc["id"]), false)):
 			continue
 		var home: Vector2 = cc["home"]
 		var entry := {
@@ -2420,8 +2455,10 @@ func _parent_death() -> void:
 	var p_age := age
 	var kid_age := int((pov_state.get("child", {}) as Dictionary).get("age", 0))
 	parents_alive = maxi(0, parents_alive - 1)
+	# A03：用 alive/death_record 表示死亡，不再靠删除人物实体
+	parent_dead[who] = true
+	parent_death_year[who] = year
 	_switch_pov("child")
-	pov_state.erase(who)
 	_spawn_npcs()
 	_refresh_pov_bar()
 	var lines: Array = [
