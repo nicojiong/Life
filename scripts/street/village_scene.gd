@@ -284,7 +284,6 @@ const YEAR_SCENES := [
 	{"m": 2, "id": "bing", "name": "卧病", "cond": "ill"},
 	{"m": 4, "id": "bai_shi", "name": "拜师", "cond": "apprentice"},
 	{"m": 3, "id": "kai_meng", "name": "开蒙", "cond": "preference"},
-	{"m": 5, "id": "ti_qin", "name": "提亲", "cond": "marriage"},
 ]
 var scenes_done := {}
 
@@ -1194,6 +1193,18 @@ func _replay_restore(snap: Dictionary) -> void:
 	events_enabled = bool(snap["events"])
 	save_future = bool(snap["save_future"])
 	ended = bool(snap["ended"])
+	# M3-03：婚配状态必须一起还原，否则重放第二次会多出一次提亲
+	if snap.has("marriage_pending"):
+		marriage_pending = bool(snap["marriage_pending"])
+		marriage_refused = bool(snap.get("marriage_refused", marriage_refused))
+		marriage_wait_until = int(snap.get("marriage_wait_until", marriage_wait_until))
+	if snap.has("month_frac"):
+		month_frac = float(snap["month_frac"])
+	if snap.has("rng"):
+		var r2: Dictionary = snap["rng"]
+		rng_world.state = int(str(r2.get("world", str(rng_world.state))))
+		rng_actor.state = int(str(r2.get("actor", str(rng_actor.state))))
+		rng_birth.state = int(str(r2.get("birth", str(rng_birth.state))))
 
 
 func _replay_digest(seed_value: int) -> String:
@@ -3462,8 +3473,6 @@ func _run_verify_smoke() -> void:
 	npc_state["li_shen"]["last_year"] = 0
 	var refuse_before := npc_log.size()
 	_npc_year_tick()
-	# M3-03：婚配与子女按家境/婚育/健康发生，不再按固定年龄
-	_family_year_tick()
 	var refuse_after := npc_log.size()
 	var refused := false
 	for f in npc_log:
@@ -6732,8 +6741,6 @@ func _on_new_year() -> void:
 	_kin_death_pass()
 	# M3-01a：核心 NPC 每年自主行动一次，不依赖玩家点击
 	_npc_year_tick()
-	# M3-03：婚配与子女按家境/婚育/健康发生，不再按固定年龄
-	_family_year_tick()
 	if ended:
 		return
 	if health <= 0.0:
@@ -7550,9 +7557,8 @@ func _family_year_tick() -> void:
 		return
 	if not married and not marriage_refused and not marriage_pending:
 		if age >= 18 and age >= marriage_wait_until and money >= 400:
+			# 只改状态，不写事实、不弹提示：重放要能对齐
 			marriage_pending = true
-			_log_fact("family", "marriage_offer", {"age": age, "money": money})
-			_toast("邻村周家托人来问，说想结这门亲。", Color(0.48, 0.32, 0.16))
 	if married and children < 4 and age < 42 and health > 40.0:
 		if _arnd() < 0.22:
 			children += 1
