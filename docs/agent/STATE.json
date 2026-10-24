@@ -12,8 +12,8 @@
     "current_task":  "M1-04",
     "next_task":  "M1-04",
     "task_status":  "in_progress",
-    "branch":  "agent/M1-04b-dead-parent",
-    "base_sha":  "1788fe87772950d839ecb00d0a25f153e9764e1b",
+    "branch":  "agent/M1-04c-atomic-save",
+    "base_sha":  "f019e8d367cb5df74749ed1ffafc4badb98a1e01",
     "commit_sha":  "07fbe20d45fa6d8ce4c9ff0914471a74b2a92401",
     "remote_sha":  "07fbe20d45fa6d8ce4c9ff0914471a74b2a92401",
     "pr_url":  null,
@@ -24,5 +24,5 @@
                      "docs/BASELINE.md",
                      "docs/tasks/M0-01.md"
                  ],
-    "next_step":  "推送后记录 SHA；下一片 M1-04c：原子写入与备份"
+    "next_step":  "推送后记录 SHA；下一片 M1-04d：旧档迁移 fixtures，然后 M1-02 统一时钟"
 }

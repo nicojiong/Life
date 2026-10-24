@@ -110,6 +110,7 @@ var save_schema_seen := 0
 ## A03：父母是否已故（保留人物记录，不用删除表示死亡）
 var parent_dead := {"father": false, "mother": false}
 var parent_death_year := {"father": 0, "mother": 0}
+var recovered_from_backup := false
 
 var _re_time := RegEx.new()
 
@@ -343,24 +344,56 @@ func _save_game() -> void:
 	if ended:
 		print("[SAVE] refused_after_end")
 		return
-	var f := FileAccess.open(_save_file(), FileAccess.WRITE)
+	# 原子写入：先写 .tmp → 旧的挪成 .bak → .tmp 顶上去；中途断电最多丢一次写入
+	var main := _save_file()
+	var tmp := main + ".tmp"
+	var bak := main + ".bak"
+	var f := FileAccess.open(tmp, FileAccess.WRITE)
 	if f == null:
+		print("[SAVE] open_tmp_failed ", tmp)
 		return
 	f.store_string(JSON.stringify(_state_dict()))
 	f.close()
+	var abs_main := ProjectSettings.globalize_path(main)
+	var abs_tmp := ProjectSettings.globalize_path(tmp)
+	var abs_bak := ProjectSettings.globalize_path(bak)
+	if FileAccess.file_exists(main):
+		if FileAccess.file_exists(bak):
+			DirAccess.remove_absolute(abs_bak)
+		DirAccess.rename_absolute(abs_main, abs_bak)
+	var err := DirAccess.rename_absolute(abs_tmp, abs_main)
+	if err != OK:
+		print("[SAVE] promote_failed err=", err)
+
+
+func _read_save_dict(path: String) -> Dictionary:
+	if not FileAccess.file_exists(path):
+		return {}
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return {}
+	var txt := f.get_as_text()
+	f.close()
+	# 用 JSON 实例解析：损坏时返回错误码而不是往 stderr 打引擎 ERROR
+	var j := JSON.new()
+	if j.parse(txt) != OK:
+		print("[SAVE] corrupt_or_unreadable ", path, " err=", j.get_error_message())
+		return {}
+	if j.data is Dictionary:
+		return j.data
+	return {}
 
 
 func _load_game() -> bool:
-	if not FileAccess.file_exists(_save_file()):
+	recovered_from_backup = false
+	var d := _read_save_dict(_save_file())
+	if d.is_empty():
+		d = _read_save_dict(_save_file() + ".bak")
+		if not d.is_empty():
+			recovered_from_backup = true
+			print("[SAVE] recovered_from_backup")
+	if d.is_empty():
 		return false
-	var f := FileAccess.open(_save_file(), FileAccess.READ)
-	if f == null:
-		return false
-	var parsed: Variant = JSON.parse_string(f.get_as_text())
-	f.close()
-	if not (parsed is Dictionary):
-		return false
-	var d: Dictionary = parsed
 	name_text = str(d.get("name", name_text))
 	place = str(d.get("place", place))
 	year = int(d.get("year", year))
@@ -825,6 +858,27 @@ func _run_verify_smoke() -> void:
 	parent_death_year["father"] = 0
 	pov = pov_before
 
+	# A02：写入中断/损坏可回退备份
+	money = 100
+	_save_game()
+	money = 200
+	_save_game()
+	var main_abs := ProjectSettings.globalize_path(_save_file())
+	var broken := FileAccess.open(_save_file(), FileAccess.WRITE)
+	if broken != null:
+		broken.store_string("{ this is not json")
+		broken.close()
+	money = 0
+	var ok_backup := _load_game()
+	if ok_backup and recovered_from_backup and money == 100:
+		oks += 1
+		print("[VERIFY] PASS save_recovers_from_backup money=", money)
+	else:
+		fails.append("save_recovers_from_backup")
+		print("[VERIFY] FAIL save_recovers_from_backup ok=", ok_backup,
+			" recovered=", recovered_from_backup, " money=", money)
+	recovered_from_backup = false
+
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
 	var keep_age := age
@@ -1156,10 +1210,13 @@ func debug_exam() -> void:
 
 
 func _clear_save() -> void:
-	if FileAccess.file_exists(_save_file()):
-		var dir := DirAccess.open("user://")
-		if dir != null:
-			dir.remove(_save_file().get_file())
+	var dir := DirAccess.open("user://")
+	if dir == null:
+		return
+	var base := _save_file().get_file()
+	for f in [base, base + ".bak", base + ".tmp"]:
+		if FileAccess.file_exists("user://" + f):
+			dir.remove(f)
 
 
 func _init_identity() -> void:

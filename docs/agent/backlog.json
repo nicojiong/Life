@@ -218,6 +218,7 @@
                       "evidence":  [
                                        "docs/verification/M1-04a.md",
                                        "docs/verification/M1-04b.md",
+                                       "docs/verification/M1-04c.md",
                                        "docs/tasks/M1-04.md"
                                    ],
                       "commit_sha":  null,
