@@ -106,7 +106,7 @@ var month_frac := 0.0
 
 ## 存档格式版本：字段增删时递增，读档据此做迁移
 const ContentSchema := preload("res://scripts/core/content_schema.gd")
-const SAVE_SCHEMA_VERSION := 14
+const SAVE_SCHEMA_VERSION := 15
 var save_schema_seen := 0
 ## 读到更高版本的存档后置位：拒绝加载、拒绝覆盖
 var save_future := false
@@ -279,11 +279,29 @@ const YEAR_SCENES := [
 	{"m": 7, "id": "zhongyuan", "name": "中元"},
 	{"m": 8, "id": "zhongqiu", "name": "中秋"},
 	{"m": 11, "id": "dongzhi", "name": "冬至"},
+	{"m": 6, "id": "jiemi", "name": "青黄不接", "cond": "poor"},
+{"m": 9, "id": "debt_month", "name": "还米", "cond": "debt"},
 ]
 var scenes_done := {}
 
 ## 每个节令的选项：不是确认框，是一次小选择
 const SCENE_OPTS := {
+	"jiemi": [
+		{"id": "borrow3", "label": "借三斗", "gain": {},
+		 "text": "孙四量了三斗米，说好来年秋后还。你把米袋抱回家，母亲没问米是哪来的。"},
+		{"id": "borrow1", "label": "只借一斗", "gain": {},
+		 "text": "你只肯借一斗。孙四笑了笑，说少借点也好。"},
+		{"id": "refuse", "label": "咬牙不借", "gain": {"fame": 1},
+		 "text": "你把裤腰带又紧了一扣，没去敲孙四的门。"},
+	],
+	"debt_month": [
+		{"id": "repay", "label": "把米还上", "gain": {},
+		 "text": "你扛着米去了孙四家。"},
+		{"id": "defer", "label": "求再宽限三个月", "gain": {},
+		 "text": "你站在孙四家门口，话到嘴边说了三遍才说清楚。"},
+		{"id": "default", "label": "赖着不还", "gain": {},
+		 "text": "你把门闩上，听见外头有人站了一会儿，走了。"},
+	],
 	"yuandan": [
 		{"id": "visit", "label": "挨家去拜年", "gain": {"fame": 3},
 			"text": "你从东头走到西头，磕了十几个头，兜里塞满了炒豆。"},
@@ -424,6 +442,8 @@ func _state_dict() -> Dictionary:
 		"women_rank": women_rank, "scenes_done": scenes_done, "child_last": child_last,
 		"time_scale": time_scale, "slot": slot, "month_frac": month_frac,
 	"boundary_log": boundary_log.duplicate(true), "player_build": (player_build as Dictionary).duplicate(true),
+	"debt_units": debt_units, "debt_due": debt_due, "debt_state": debt_state,
+	"debt_deferrals": debt_deferrals, "debt_due_sid": debt_due_sid,
 		"parent_dead": parent_dead, "parent_death_year": parent_death_year,
 		"action_cooldown": action_cooldown, "last_settled_year": last_settled_year,
 		"facts": facts, "relations": relations, "actor_vitals": actor_vitals,
@@ -588,6 +608,11 @@ func _load_game() -> bool:
 	month_frac = float(d.get("month_frac", month_frac))
 	if d.get("boundary_log") is Array:
 		boundary_log = d["boundary_log"]
+	debt_units = int(d.get("debt_units", debt_units))
+	debt_due = int(d.get("debt_due", debt_due))
+	debt_state = str(d.get("debt_state", debt_state))
+	debt_deferrals = int(d.get("debt_deferrals", debt_deferrals))
+	debt_due_sid = int(d.get("debt_due_sid", debt_due_sid))
 	if d.get("player_build") is Dictionary:
 		player_build = d["player_build"]
 	if d.get("parent_dead") is Dictionary:
@@ -1297,6 +1322,7 @@ func _continuity_snapshot() -> Dictionary:
 		"identity": {"name": name_text, "place": place, "birth_year": birth_year,
 			"father": father_name, "mother": mother_name},
 		"frac_probe": int(month_frac + 0.58),
+		"debt": {"units": debt_units, "due": debt_due, "state": debt_state, "deferrals": debt_deferrals, "sid": debt_due_sid},
 	}
 
 
@@ -2804,6 +2830,104 @@ func _run_verify_smoke() -> void:
 		print("[VERIFY] FAIL queue_policies mutex=", mutex_ok, " expire=", expired_ok, " cancel=", cancel_ok2, " sid=", sid_c, " cancelled=", cancelled, " money=", cancel_money, " marks=", cancel_marks, " events=", cancel_events)
 
 
+	# M2-03a：借米链——借、还、延期、拒绝、资源不足、到期赖账、重载后一致
+	var keep_db_pov := pov
+	var keep_db_inst: Array = (event_instances as Array).duplicate(true)
+	var keep_db_seq := event_seq
+	var keep_db_facts: Array = (facts as Array).duplicate(true)
+	var keep_db_money := money
+	var keep_db_units := debt_units
+	var keep_db_due := debt_due
+	var keep_db_state := debt_state
+	var keep_db_defer := debt_deferrals
+	var keep_db_sid := debt_due_sid
+	if pov != "child":
+		_switch_pov("child")
+	# 干净起点：成年、无债、没有已还清标记
+	age = 22
+	money = 100
+	debt_units = 0
+	debt_due = 0
+	debt_state = "none"
+	debt_deferrals = 0
+	debt_due_sid = 0
+	story.erase("借米还清")
+	event_instances = []
+	event_seq = 0
+	# 1) 22 岁仍可借款，且到期实例绑在孩子身上
+	var borrowed := _borrow_rice(3)
+	var debt_q := event_instances.size() == 1 and str((event_instances[0] as Dictionary).get("target", "")) == "child"
+	var amount_ok: bool = money == 100 + 3 * RICE_UNIT_VALUE and _debt_amount() == 600
+	# 2) 钱不够时偿还会失败，状态不变
+	money = 500
+	var fail_res := _repay_debt()
+	var insufficient_ok: bool = fail_res == "insufficient" and debt_state == "borrowed" and debt_units == 3
+	# 3) 够钱时还清：到期实例被取消、关系上升、解锁后续机会
+	money = 900
+	var repaid := _repay_debt()
+	var sid_cancelled := true
+	for inst in event_instances:
+		if int((inst as Dictionary).get("sid", 0)) == keep_db_sid:
+			pass
+	var repay_ok: bool = repaid == "repaid" and money == 300 and debt_state == "repaid" and _debt_unlocks_guarantee()
+	# 4) 再借一笔，延期：旧到期失效，新到期只执行一次
+	debt_state = "none"
+	story.erase("借米还清")
+	event_instances = []
+	event_seq = 0
+	_borrow_rice(2)
+	var first_sid := debt_due_sid
+	var first_due := debt_due
+	var defer_res := _defer_debt()
+	var old_cancelled := true
+	for inst in event_instances:
+		var d: Dictionary = inst
+		if int(d.get("sid", 0)) == first_sid and not bool(d.get("fired", false)):
+			old_cancelled = false
+	var new_due := debt_due
+	var defer_ok: bool = defer_res == "deferred" and old_cancelled and new_due == first_due + 3 and debt_deferrals == 1
+	# 5) 到期结算：钱不够 → 赖账，记一次失败，不重复
+	money = 0
+	var settle1 := _debt_settle_due()
+	var settle2 := _debt_settle_due()
+	var default_ok: bool = settle1 == "defaulted" and settle2 == "no_debt" and debt_state == "defaulted" and bool(story.get("欠债未还", false))
+	# 6) 存读档保持债务状态与到期
+	debt_state = "none"
+	story.erase("借米还清")
+	event_instances = []
+	event_seq = 0
+	_borrow_rice(1)
+	_defer_debt()
+	var saved_due := debt_due
+	var saved_units := debt_units
+	_save_game()
+	debt_state = "none"
+	debt_units = 0
+	debt_due = 0
+	_load_game()
+	var reload_ok: bool = debt_state == "borrowed" and debt_units == saved_units and debt_due == saved_due and debt_deferrals == 1
+	var debt_ok: bool = borrowed and debt_q and amount_ok and insufficient_ok and repay_ok and defer_ok and default_ok and reload_ok
+	# 还原
+	event_instances = keep_db_inst
+	event_seq = keep_db_seq
+	facts = keep_db_facts
+	fact_seq = keep_db_facts.size()
+	money = keep_db_money
+	debt_units = keep_db_units
+	debt_due = keep_db_due
+	debt_state = keep_db_state
+	debt_deferrals = keep_db_defer
+	debt_due_sid = keep_db_sid
+	if pov != keep_db_pov:
+		_switch_pov(keep_db_pov)
+	if debt_ok:
+		oks += 1
+		print("[VERIFY] PASS debt_chain borrowed=", borrowed, " repay=", repay_ok, " defer=", defer_ok, " default=", default_ok, " reload=", reload_ok)
+	else:
+		fails.append("debt_chain")
+		print("[VERIFY] FAIL debt_chain borrowed=", borrowed, " queue=", debt_q, " amount=", amount_ok, " insufficient=", insufficient_ok, " repay=", repay_ok, " defer=", defer_ok, " default=", default_ok, " reload=", reload_ok, " defer_res=", defer_res, " first=", first_due, " new=", new_due, " defs=", debt_deferrals, " oldc=", old_cancelled)
+
+
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
 	var keep_age := age
@@ -3489,7 +3613,7 @@ func _due_scene() -> Dictionary:
 	for s in YEAR_SCENES:
 		var key := "%d_%s" % [year, str(s["id"])]
 		var m := int(s["m"])
-		if month >= m and month <= m + 2 and not scenes_done.has(key):
+		if month >= m and month <= m + 2 and not scenes_done.has(key) and _scene_ok(s as Dictionary):
 			return s
 	return {}
 
@@ -3532,6 +3656,38 @@ func _do_scene(s: Dictionary) -> void:
 
 
 func _pick_scene_option(sid: String, oid: String) -> void:
+	# M2-03a：借米相关的选择走债务接口，不套用通用增益
+	if sid == "jiemi":
+		if oid == "borrow3":
+			_borrow_rice(3)
+		elif oid == "borrow1":
+			_borrow_rice(1)
+		elif oid == "refuse":
+			relations[DEBT_CREDITOR] = int(relations.get(DEBT_CREDITOR, 0)) + 1
+			story["谢绝借米"] = true
+		scenes_done["%d_%s" % [year, sid]] = true
+		var jump0 := _scene_months_to_next()
+		if jump0 > 0:
+			_advance_months(jump0)
+		Sfx.play("ok")
+		_save_game()
+		return
+	if sid == "debt_month":
+		if oid == "repay":
+			var res := _repay_debt()
+			if res == "insufficient":
+				_toast("米缸见了底，你张了几次口，没敢去。", Color(0.62, 0.24, 0.18))
+				_log_fact("debt", "repay_failed", {"units": debt_units})
+				scenes_done["%d_%s" % [year, sid]] = true
+				return
+		elif oid == "defer":
+			_defer_debt()
+		elif oid == "default":
+			_default_debt()
+		scenes_done["%d_%s" % [year, sid]] = true
+		Sfx.play("ok")
+		_save_game()
+		return
 	for o in SCENE_OPTS.get(sid, []):
 		var opt: Dictionary = o
 		if str(opt["id"]) != oid:
@@ -6119,6 +6275,123 @@ func _drain_due_events() -> int:
 	return fired
 
 
+## ------------------------------------------------------------------
+## M2-03a 借米因果链
+## 借款单位：斗（一斗约 200 文）；债主固定为村东的孙四。
+## 状态：none -> borrowed -> repaid / defaulted；defer 只改到期时间。
+## ------------------------------------------------------------------
+
+const RICE_UNIT_VALUE := 200
+const DEBT_CREDITOR := "sunsi"
+const DEBT_CREDITOR_NAME := "孙四"
+
+var debt_units := 0            # 未还斗数
+var debt_due := 0              # 到期月索引（0 = 无债）
+var debt_state := "none"       # none / borrowed / repaid / defaulted
+var debt_deferrals := 0
+var debt_due_sid := 0          # 当前到期实例的 sid
+
+
+func _debt_amount() -> int:
+	return debt_units * RICE_UNIT_VALUE
+
+
+func _has_active_debt() -> bool:
+	return debt_state == "borrowed" and debt_units > 0
+
+
+func _borrow_rice(units: int) -> bool:
+	# 借米：立即拿到钱，欠条进队列，到期自动结算
+	if _has_active_debt() or units <= 0:
+		return false
+	debt_units = units
+	debt_state = "borrowed"
+	debt_deferrals = 0
+	debt_due = _month_index() + 6
+	money += units * RICE_UNIT_VALUE
+	relations[DEBT_CREDITOR] = int(relations.get(DEBT_CREDITOR, 0)) + 1
+	story["借过米"] = true
+	debt_due_sid = _enqueue_event("debt_due", "debt", debt_due, 0, "child", "cancel", "debt", debt_due)
+	_log_fact("debt", "borrowed", {"units": units, "due": debt_due, "amount": _debt_amount()})
+	_toast("孙四量了%d斗米给你，说好来年秋后还。" % units, Color(0.30, 0.42, 0.22))
+	return true
+
+
+func _repay_debt() -> String:
+	# 返回 repaid / insufficient / no_debt
+	if not _has_active_debt():
+		return "no_debt"
+	var amount := _debt_amount()
+	if money < amount:
+		return "insufficient"
+	money -= amount
+	debt_state = "repaid"
+	debt_units = 0
+	_cancel_event(debt_due_sid, "debt_repaid")
+	debt_due_sid = 0
+	relations[DEBT_CREDITOR] = int(relations.get(DEBT_CREDITOR, 0)) + 2
+	story["借米还清"] = true
+	_log_fact("debt", "repaid", {"amount": amount, "deferrals": debt_deferrals})
+	_toast("你把米还了，孙四掂了掂，说你还算个守信的人。", Color(0.30, 0.42, 0.22))
+	return "repaid"
+
+
+func _defer_debt() -> String:
+	# 宽限三个月；最多两次，之后只能还或赖
+	if not _has_active_debt():
+		return "no_debt"
+	if debt_deferrals >= 2:
+		return "no_more_deferral"
+	debt_deferrals += 1
+	_cancel_event(debt_due_sid, "debt_deferred")
+	# 延期从原到期日顺延，而不是从现在重新算
+	debt_due = maxi(_month_index() + 1, debt_due + 3)
+	relations[DEBT_CREDITOR] = int(relations.get(DEBT_CREDITOR, 0)) - 1
+	_log_fact("debt", "deferred", {"deferrals": debt_deferrals, "due": debt_due})
+	_toast("孙四皱着眉，还是给了你三个月。", Color(0.62, 0.24, 0.18))
+	return "deferred"
+
+
+func _default_debt() -> void:
+	if not _has_active_debt():
+		return
+	debt_state = "defaulted"
+	debt_units = 0
+	_cancel_event(debt_due_sid, "debt_defaulted")
+	debt_due_sid = 0
+	relations[DEBT_CREDITOR] = int(relations.get(DEBT_CREDITOR, 0)) - 3
+	story["欠债未还"] = true
+	_log_fact("debt", "defaulted", {"deferrals": debt_deferrals})
+	_toast("孙四在门口站了半天，没进门。村里人都知道了。", Color(0.62, 0.24, 0.18))
+
+
+func _debt_settle_due() -> String:
+	# 到期：够钱就自动还，不够就赖账
+	if not _has_active_debt():
+		return "no_debt"
+	if money >= _debt_amount():
+		return _repay_debt()
+	_default_debt()
+	return "defaulted"
+
+
+func _debt_unlocks_guarantee() -> bool:
+	# 还清过米的人，邻居愿意作保——这是关系变化带来的实际后续机会
+	return bool(story.get("借米还清", false))
+
+
+func _scene_ok(s: Dictionary) -> bool:
+	var cond := str(s.get("cond", ""))
+	match cond:
+		"poor":
+			return money < 300
+		"debt":
+			return _has_active_debt()
+		"debt_free":
+			return debt_state == "none"
+	return true
+
+
 func _eligible_opportunities() -> Array:
 	# M2-02：候选 = 条件满足 + 冷却已过
 	var now := _month_index()
@@ -6131,6 +6404,11 @@ func _eligible_opportunities() -> Array:
 		if opp_last.has(eid) and now - int(opp_last[eid]) < cd:
 			continue
 		pool.append(e)
+	# M2-03a：还清借米会解锁一次作保机会（冷却 60 个月，只发生一次）
+	if _debt_unlocks_guarantee() and not pool.any(func(x): return str((x as Dictionary).get("id", "")) == "neighbor_guarantee"):
+		var g_now := _month_index()
+		if not opp_last.has("neighbor_guarantee") or g_now - int(opp_last["neighbor_guarantee"]) >= 60:
+			pool.append({"id": "neighbor_guarantee", "weight": 6, "cooldown": 60})
 	return pool
 
 
@@ -6318,6 +6596,14 @@ func _apply_event(id: String) -> void:
 	var bad := Color(0.62, 0.24, 0.18)
 	var good := Color(0.30, 0.42, 0.22)
 	match id:
+		"debt_due":
+			_debt_settle_due()
+		"neighbor_guarantee":
+			var gain := 800
+			money += gain
+			fame = minf(100.0, fame + 2.0)
+			story["有人作保"] = true
+			_toast("孙四替你在里正面前说了句话，县里减了你一半的差役钱。", Color(0.30, 0.42, 0.22))
 		"plague":
 			# 按医者等级分档，数据表达不了
 			if med_rank >= 3:

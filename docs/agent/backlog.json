@@ -339,9 +339,7 @@
                       "status":  "in_progress",
                       "owner":  null,
                       "evidence":  [
-                                       "docs/verification/M2-03a.md",
-                                       "docs/verification/M2-03b.md",
-                                       "docs/verification/M2-03c.md"
+                                       "docs/verification/M2-03a-debt.md"
                                    ],
                       "commit_sha":  null,
                       "remote_sha":  null,
