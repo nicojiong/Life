@@ -1,0 +1,103 @@
+name: verify
+
+# 隔离验证入口：与本地 tools/verify.ps1 同一套断言。
+# 失败时先打印日志摘要（会成为 GitHub 注解），再上传 verify-artifacts/ 便于下载。
+# 续跑（continuity）是独立 job：smoke 与 replay 分开报告，失败各自红。
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  isolated-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Godot 4.7.2 (headless)
+        run: |
+          set -euo pipefail
+          ZIP=Godot_v4.7.2-stable_linux.x86_64.zip
+          curl -fsSL -o /tmp/godot.zip "https://github.com/godotengine/godot/releases/download/4.7.2-stable/${ZIP}"
+          mkdir -p /tmp/godot
+          unzip -q /tmp/godot.zip -d /tmp/godot
+          chmod +x /tmp/godot/Godot_v4.7.2-stable_linux.x86_64
+          /tmp/godot/Godot_v4.7.2-stable_linux.x86_64 --version
+
+      - name: Run isolated verification
+        run: |
+          pwsh -NoProfile -File tools/verify.ps1 \
+            -GodotPath /tmp/godot/Godot_v4.7.2-stable_linux.x86_64 \
+            -ExpectedAssertions 50 \
+            -ArtifactDir "$GITHUB_WORKSPACE/verify-artifacts"
+
+      - name: Show verification log
+        if: always()
+        run: |
+          LOG="$GITHUB_WORKSPACE/verify-artifacts/run.log"
+          if [ -f "$LOG" ]; then
+            echo "----- verify log (last 60 lines) -----"
+            tail -n 60 "$LOG"
+            echo "--------------------------------------"
+            # 关键行转成注解，公开仓库无需登录即可读到失败原因
+            grep -E '\[VERIFY\] FAIL|\[verify\] FAIL|\[SAVE\] refused|ERROR' "$LOG" | head -n 20 | while IFS= read -r line; do
+              echo "::error::${line}"
+            done
+          else
+            echo "::error::verify-artifacts/run.log 不存在，脚本可能未能启动"
+          fi
+
+      - name: Upload verification artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-artifacts
+          path: verify-artifacts/
+          if-no-files-found: warn
+
+  continuity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Godot 4.7.2 (headless)
+        run: |
+          set -euo pipefail
+          ZIP=Godot_v4.7.2-stable_linux.x86_64.zip
+          curl -fsSL -o /tmp/godot.zip "https://github.com/godotengine/godot/releases/download/4.7.2-stable/${ZIP}"
+          mkdir -p /tmp/godot
+          unzip -q /tmp/godot.zip -d /tmp/godot
+          chmod +x /tmp/godot/Godot_v4.7.2-stable_linux.x86_64
+
+      - name: Run cross-process continuity
+        run: |
+          pwsh -NoProfile -File tools/continuity.ps1 \
+            -GodotPath /tmp/godot/Godot_v4.7.2-stable_linux.x86_64 \
+            -ArtifactDir "$GITHUB_WORKSPACE/verify-artifacts/continuity"
+
+      - name: Show continuity report
+        if: always()
+        run: |
+          REP="$GITHUB_WORKSPACE/verify-artifacts/continuity/report.txt"
+          if [ -f "$REP" ]; then
+            echo "----- continuity report -----"
+            cat "$REP"
+            echo "-----------------------------"
+            grep -E '差异|不一致|失败|未检出' "$REP" | while IFS= read -r line; do
+              echo "::error::${line}"
+            done
+          else
+            echo "::error::continuity/report.txt 不存在，续跑可能未能启动"
+          fi
+
+      - name: Upload continuity artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: continuity-artifacts
+          path: verify-artifacts/continuity/
+          if-no-files-found: warn

@@ -1,4 +1,4 @@
-﻿# Godot
+# Godot
 .godot/
 *.import
 export_presets.cfg
@@ -10,3 +10,9 @@ run.err.log
 
 # 临时调试图
 docs/shots/_*.png
+
+# 验证产物
+verify-artifacts/
+
+# 试玩构建（playtest.bat 生成）
+playtest_build/

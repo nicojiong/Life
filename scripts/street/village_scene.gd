@@ -104,11 +104,119 @@ var speed_btn: Button = null
 var women_rank := 0
 var month_frac := 0.0
 
+## 存档格式版本：字段增删时递增，读档据此做迁移
+const SAVE_SCHEMA_VERSION := 14
+var save_schema_seen := 0
+## 读到更高版本的存档后置位：拒绝加载、拒绝覆盖
+var save_future := false
+## A03：父母是否已故（保留人物记录，不用删除表示死亡）
+var parent_dead := {"father": false, "mother": false}
+var parent_death_year := {"father": 0, "mother": 0}
+var recovered_from_backup := false
+## M1-02：每个行动的世界时间冷却（键 = 行动标签，值 = 可再次执行的月份序号）
+var action_cooldown := {}
+## M1-02b：年关结算水位，保证一年只结算一次
+var last_settled_year := 0
+## M1-05b：一年里各阶段的执行顺序，供断言与调试检查
+var boundary_log: Array = []
+## M1-01b：三个人的年龄/健康/寿数只存一份。当前操控者的真值是全局字段，
+## 其余人在 actor_vitals；pov_state 只留职业与 story。
+var actor_vitals: Dictionary = {}
+
+
+func _vitals_of(who: String) -> Dictionary:
+	if who == pov:
+		return {"age": age, "health": health, "lifespan": lifespan}
+	var v: Dictionary = actor_vitals.get(who, {})
+	return {"age": int(v.get("age", 0)), "health": float(v.get("health", 100.0)), "lifespan": int(v.get("lifespan", 100))}
+
+
+func _store_active_vitals() -> void:
+	actor_vitals[pov] = {"age": age, "health": health, "lifespan": lifespan}
+
+## M1-03：模拟专用随机流（与画面/游走的随机分开），可存可复现
+## M1-03d：三条可保存的模拟流（出生 / 世界 / 人物决策）
+## render 与 debug 不进这组：表现层随机用各自动作里的局部 RNG，绝不参与模拟
+var rng_world := RandomNumberGenerator.new()
+var rng_actor := RandomNumberGenerator.new()
+var rng_birth := RandomNumberGenerator.new()
+var sim_seed := 0
+
+
+func _init_sim_rng(s: int) -> void:
+	# 三条流从同一个基底种子派生，彼此独立
+	sim_seed = s
+	rng_world.seed = s
+	rng_actor.seed = s + 1
+	rng_birth.seed = s + 2
+
+
+func _rnd() -> float:
+	return rng_world.randf()
+
+
+func _rndi(a: int, b: int) -> int:
+	return rng_world.randi_range(a, b)
+
+
+func _rndf(a: float, b: float) -> float:
+	return rng_world.randf_range(a, b)
+
+
+func _arnd() -> float:
+	return rng_actor.randf()
+
+
+func _arndi(a: int, b: int) -> int:
+	return rng_actor.randi_range(a, b)
+
+
+## M1-03b：事实日志。每条记"什么时候、什么类型、由什么引起"，供墓志与调试追溯
+var facts: Array = []
+const FACT_CAP := 240
+var fact_seq := 0
+## 已被裁剪掉的最大事实 id；比它小的引用算已归档
+var fact_floor := 0
+## M2-03：最近一次年关结算 / 最近一次事件的事实 id，用于串因果链
+var last_boundary_fid := 0
+var last_event_fid := 0
+## M1-01a：人物关系（id → attitude），由世界持有，不随场景重建消失
+var relations: Dictionary = {}
+## 测试时关掉年度随机事件，避免随机扣血/扣钱干扰断言
+var events_enabled := true
+
+
+func _log_fact(kind: String, cause: String, data: Dictionary = {}, cause_fid: int = 0) -> int:
+	# M2-03：每条事实有自增 fid，并可选地指向造成它的上一条事实（cause_fid）
+	fact_seq += 1
+	facts.append({"fid": fact_seq, "t": _month_index(), "kind": kind, "cause": cause, "data": data, "cause_fid": cause_fid})
+	# 裁剪时记下被丢掉的最大 fid，这样旧引用是"已归档"而不是"悬空"
+	while facts.size() > FACT_CAP:
+		var dropped: Dictionary = facts.pop_front()
+		fact_floor = maxi(fact_floor, int(dropped.get("fid", 0)))
+	return fact_seq
+
+
+func _fact_chain(fid: int) -> Array:
+	# 从一条事实往回追，最多 16 层，防止脏数据造成死循环
+	var chain: Array = []
+	var cursor := fid
+	var by_fid := {}
+	for f in facts:
+		by_fid[int((f as Dictionary).get("fid", 0))] = f
+	while cursor > fact_floor and chain.size() < 16:
+		if not by_fid.has(cursor):
+			break
+		var cur: Dictionary = by_fid[cursor]
+		chain.append(cursor)
+		cursor = int(cur.get("cause_fid", 0))
+	return chain
+
 var _re_time := RegEx.new()
 
 ## 切换视角时要保存/恢复的字段（钱是全家共用的，不在其中）
 const POV_FIELDS := [
-	"age", "health", "learning", "craft", "fame", "lifespan",
+	"learning", "craft", "fame",
 	"craft_rank", "trade_rank", "med_rank", "farm_rank", "mil_rank",
 	"office_rank", "gov_merit", "scandal", "county",
 	"land", "workshop_open", "guild_open", "apprentice_hired", "med_book",
@@ -139,22 +247,9 @@ var ended := false
 const SAVE_DIR := "user://"
 
 ## 随机事件池：每年 32% 概率触发一条，按年龄与身份筛选
-const EVENTS := [
-	{"id": "drought", "min_age": 8},
-	{"id": "flood", "min_age": 8},
-	{"id": "levy", "min_age": 12},
-	{"id": "thieves", "min_age": 12},
-	{"id": "plague", "min_age": 10},
-	{"id": "suit", "min_age": 16},
-	{"id": "wedding", "min_age": 10},
-	{"id": "harvest", "min_age": 16, "cond": "farm"},
-	{"id": "reward", "min_age": 20, "cond": "famous"},
-	{"id": "school", "min_age": 25, "cond": "parent"},
-	{"id": "rash", "min_age": 1, "max_age": 6},
-	{"id": "riverfall", "min_age": 2, "max_age": 7},
-	{"id": "find_coin", "min_age": 3, "max_age": 8},
-	{"id": "quarrel", "min_age": 3, "max_age": 9},
-]
+## M2-02：机会定义。weight 决定被抽中的相对概率，cooldown 是最短复发间隔（月）
+## M3-01：事件定义搬进 data/events.json，运行时装入；缺文件时为空并会被 content_ids_valid 抓住
+var EVENTS: Array = []
 
 ## 各地点允许去的最小年龄；太小的时候只能在家
 ## 0-6 岁：不由玩家选，由父母带着过。每年抽一条。
@@ -272,6 +367,12 @@ var panel_hint: Label
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	# 模拟随机流先于身份生成初始化：同种子得到同一份出身与一生
+	var boot := int(Time.get_ticks_usec()) ^ randi()
+	EVENTS = DB.events.duplicate(true)
+	if EVENTS.is_empty():
+		push_warning("[DB] events.json 为空，年度事件不会发生")
+	_init_sim_rng(boot)
 	_init_identity()
 	var resumed := _load_game()
 	_rebuild()
@@ -300,6 +401,7 @@ func _ready() -> void:
 
 func _state_dict() -> Dictionary:
 	return {
+		"schema_version": SAVE_SCHEMA_VERSION,
 		"name": name_text, "place": place, "year": year, "month": month, "age": age,
 		"money": money, "learning": learning, "craft": craft, "fame": fame,
 		"health": health, "lifespan": lifespan,
@@ -316,6 +418,20 @@ func _state_dict() -> Dictionary:
 		"can_walk": can_walk,
 		"office_rank": office_rank, "gov_merit": gov_merit, "scandal": scandal, "county": county,
 		"milestones": milestones,
+		# A02：此前遗漏、读档后会被重新随机或重置的状态
+		"father_trade": father_trade, "mother_temper": mother_temper,
+		"women_rank": women_rank, "scenes_done": scenes_done, "child_last": child_last,
+		"time_scale": time_scale, "slot": slot, "month_frac": month_frac,
+	"boundary_log": boundary_log.duplicate(true), "player_build": (player_build as Dictionary).duplicate(true),
+		"parent_dead": parent_dead, "parent_death_year": parent_death_year,
+		"action_cooldown": action_cooldown, "last_settled_year": last_settled_year,
+		"facts": facts, "relations": relations, "actor_vitals": actor_vitals,
+		"event_instances": event_instances, "event_seq": event_seq, "opp_last": opp_last,
+		"fact_seq": fact_seq, "fact_floor": fact_floor, "last_event_fid": last_event_fid, "last_boundary_fid": last_boundary_fid,
+		# RNG 的 64 位 seed/state 用十进制字符串，避免 JSON 精度丢失
+		"sim_seed": str(sim_seed),
+		"sim_state": str(rng_world.state), "rng_actor_state": str(rng_actor.state),
+		"rng_birth_state": str(rng_birth.state),
 		"px": player.x, "py": player.y, "hour": hour,
 		"birth_year": birth_year, "father_name": father_name, "mother_name": mother_name,
 	}
@@ -326,24 +442,70 @@ func _save_file() -> String:
 
 
 func _save_game() -> void:
-	var f := FileAccess.open(_save_file(), FileAccess.WRITE)
+	# A01：人生已经结束后不再写普通存档，否则会覆盖死亡时清掉的档
+	if ended:
+		print("[SAVE] refused_after_end")
+		return
+	# A02：读到更高版本的存档后不再写盘，避免把新格式降级覆盖
+	if save_future:
+		print("[SAVE] refused_future_save")
+		return
+	# 原子写入：先写 .tmp → 旧的挪成 .bak → .tmp 顶上去；中途断电最多丢一次写入
+	var main := _save_file()
+	var tmp := main + ".tmp"
+	var bak := main + ".bak"
+	var f := FileAccess.open(tmp, FileAccess.WRITE)
 	if f == null:
+		print("[SAVE] open_tmp_failed ", tmp)
 		return
 	f.store_string(JSON.stringify(_state_dict()))
 	f.close()
+	var abs_main := ProjectSettings.globalize_path(main)
+	var abs_tmp := ProjectSettings.globalize_path(tmp)
+	var abs_bak := ProjectSettings.globalize_path(bak)
+	if FileAccess.file_exists(main):
+		if FileAccess.file_exists(bak):
+			DirAccess.remove_absolute(abs_bak)
+		DirAccess.rename_absolute(abs_main, abs_bak)
+	var err := DirAccess.rename_absolute(abs_tmp, abs_main)
+	if err != OK:
+		print("[SAVE] promote_failed err=", err)
+
+
+func _read_save_dict(path: String) -> Dictionary:
+	if not FileAccess.file_exists(path):
+		return {}
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return {}
+	var txt := f.get_as_text()
+	f.close()
+	# 用 JSON 实例解析：损坏时返回错误码而不是往 stderr 打引擎 ERROR
+	var j := JSON.new()
+	if j.parse(txt) != OK:
+		print("[SAVE] corrupt_or_unreadable ", path, " err=", j.get_error_message())
+		return {}
+	if j.data is Dictionary:
+		return j.data
+	return {}
 
 
 func _load_game() -> bool:
-	if not FileAccess.file_exists(_save_file()):
+	recovered_from_backup = false
+	var d := _read_save_dict(_save_file())
+	if d.is_empty():
+		d = _read_save_dict(_save_file() + ".bak")
+		if not d.is_empty():
+			recovered_from_backup = true
+			print("[SAVE] recovered_from_backup")
+	if d.is_empty():
 		return false
-	var f := FileAccess.open(_save_file(), FileAccess.READ)
-	if f == null:
+	# A02：更高版本（未来存档）只读拒绝，既不加载也不覆盖
+	var file_ver := int(d.get("schema_version", 1))
+	if file_ver > SAVE_SCHEMA_VERSION:
+		save_future = true
+		print("[SAVE] future_version ", file_ver, " > ", SAVE_SCHEMA_VERSION)
 		return false
-	var parsed: Variant = JSON.parse_string(f.get_as_text())
-	f.close()
-	if not (parsed is Dictionary):
-		return false
-	var d: Dictionary = parsed
 	name_text = str(d.get("name", name_text))
 	place = str(d.get("place", place))
 	year = int(d.get("year", year))
@@ -388,13 +550,15 @@ func _load_game() -> bool:
 		for k in ps.keys():
 			if ps[k] is Dictionary:
 				pov_state[str(k)] = ps[k]
-	# 老存档没有父母数据时补上，不然门口会少两个人
-	var rr := RandomNumberGenerator.new()
-	rr.randomize()
-	if not pov_state.has("father"):
-		pov_state["father"] = _make_parent("father", rr)
-	if not pov_state.has("mother"):
-		pov_state["mother"] = _make_parent("mother", rr)
+	# 老存档（schema < 2）没有父母数据时补上，不然门口会少两个人；
+	# 新存档不补：缺人物只可能意味着已故，按死亡记录处理，不能复活。
+	if int(d.get("schema_version", 1)) < 2:
+		var rr := RandomNumberGenerator.new()
+		rr.randomize()
+		if not pov_state.has("father"):
+			pov_state["father"] = _make_parent("father", rr)
+		if not pov_state.has("mother"):
+			pov_state["mother"] = _make_parent("mother", rr)
 	office_rank = int(d.get("office_rank", office_rank))
 	gov_merit = int(d.get("gov_merit", gov_merit))
 	scandal = int(d.get("scandal", scandal))
@@ -408,6 +572,81 @@ func _load_game() -> bool:
 	birth_year = int(d.get("birth_year", birth_year))
 	father_name = str(d.get("father_name", father_name))
 	mother_name = str(d.get("mother_name", mother_name))
+	# A02：这些字段以前不存，读档后会变回新随机值或被重置
+	# 旧档没有 father_trade 时按 origin_flags 推导，而不是沿用内存里的随机值
+	if d.has("father_trade"):
+		father_trade = str(d["father_trade"])
+	else:
+		father_trade = _father_trade_for(origin_flags)
+	mother_temper = str(d.get("mother_temper", "和"))
+	women_rank = int(d.get("women_rank", women_rank))
+	if d.get("scenes_done") is Dictionary:
+		scenes_done = d["scenes_done"]
+	child_last = str(d.get("child_last", child_last))
+	time_scale = float(d.get("time_scale", time_scale))
+	month_frac = float(d.get("month_frac", month_frac))
+	if d.get("boundary_log") is Array:
+		boundary_log = d["boundary_log"]
+	if d.get("player_build") is Dictionary:
+		player_build = d["player_build"]
+	if d.get("parent_dead") is Dictionary:
+		var pd: Dictionary = d["parent_dead"]
+		for k in pd.keys():
+			parent_dead[str(k)] = bool(pd[k])
+	if d.get("parent_death_year") is Dictionary:
+		var py: Dictionary = d["parent_death_year"]
+		for k in py.keys():
+			parent_death_year[str(k)] = int(py[k])
+	if d.get("action_cooldown") is Dictionary:
+		action_cooldown = d["action_cooldown"]
+	last_settled_year = int(d.get("last_settled_year", last_settled_year))
+	if d.get("facts") is Array:
+		facts = d["facts"]
+	if d.get("relations") is Dictionary:
+		relations = d["relations"]
+	if d.get("actor_vitals") is Dictionary:
+		actor_vitals = d["actor_vitals"]
+	else:
+		# 旧档：从 pov_state 的旧字段迁移出生命值
+		# 关键：全局字段属于当前视角的人，不能一律当成孩子——那会把父亲的血条安到孩子身上
+		actor_vitals = {}
+		for k in pov_state.keys():
+			var ps2: Dictionary = pov_state[k]
+			actor_vitals[str(k)] = {"age": int(ps2.get("age", 0)), "health": float(ps2.get("health", 100.0)), "lifespan": int(ps2.get("lifespan", 100))}
+		actor_vitals[pov] = {"age": age, "health": health, "lifespan": lifespan}
+		if not actor_vitals.has("child"):
+			# 旧档没存孩子的状态时，用年号推算年龄，给一个中性健康值，绝不抄当前视角
+			actor_vitals["child"] = {
+				"age": maxi(0, year - birth_year),
+				"health": 80.0,
+				"lifespan": 60,
+				"estimated": true,
+			}
+	if d.get("event_instances") is Array:
+		event_instances = d["event_instances"]
+		# schema 12 的旧档没有 target/policy：不假装能恢复主体，也不静默交给孩子
+		for inst_l in event_instances:
+			if not (inst_l as Dictionary).has("target"):
+				inst_l["target"] = ""
+				inst_l["legacy_unknown_target"] = true
+			if not (inst_l as Dictionary).has("policy"):
+				inst_l["policy"] = "cancel"
+	event_seq = int(d.get("event_seq", 0))
+	if d.get("opp_last") is Dictionary:
+		opp_last = d["opp_last"]
+	fact_seq = int(d.get("fact_seq", 0))
+	fact_floor = int(d.get("fact_floor", 0))
+	last_event_fid = int(d.get("last_event_fid", 0))
+	last_boundary_fid = int(d.get("last_boundary_fid", 0))
+	if d.has("sim_seed") and d.has("sim_state"):
+		sim_seed = int(str(d["sim_seed"]))
+		rng_world.seed = sim_seed
+		rng_world.state = int(str(d["sim_state"]))
+		rng_actor.seed = sim_seed + 1
+		rng_actor.state = int(str(d.get("rng_actor_state", str(rng_actor.state))))
+		rng_birth.seed = sim_seed + 2
+		rng_birth.state = int(str(d.get("rng_birth_state", str(rng_birth.state))))
+	save_schema_seen = int(d.get("schema_version", 1))
 	return true
 
 
@@ -537,6 +776,27 @@ func _child_event_ok(ev: Dictionary) -> bool:
 	return true
 
 
+func _child_flavor() -> String:
+	# M2-07：同一件童年小事，在不同人家读起来不一样
+	var parts: Array = []
+	match father_trade:
+		"匠":
+			parts.append("父亲在院里刨木头，刨花落在你脚边。")
+		"商":
+			parts.append("父亲在灯下打算盘，珠子声一直响到你睡着。")
+		"兵":
+			parts.append("父亲在磨刀，磨一会儿就抬头看看门口。")
+		"吏":
+			parts.append("父亲在抄文书，纸边堆得老高。")
+		_:
+			parts.append("父亲从地里回来，鞋上都是泥。")
+	if money < 300:
+		parts.append("锅里是稀的。")
+	elif money > 3000:
+		parts.append("灶上还留着肉。")
+	return " ".join(parts)
+
+
 func _child_year() -> void:
 	var pool: Array = []
 	for e in CHILD_EVENTS:
@@ -548,12 +808,14 @@ func _child_year() -> void:
 				pool.append(e)
 	if pool.is_empty():
 		return
-	var ev: Dictionary = pool[randi() % pool.size()]
+	var ev: Dictionary = _pick_from(pool)
 	child_last = str(ev["id"])
 	_apply_child_event(child_last)
+	_toast(_child_flavor(), Color(0.42, 0.34, 0.22))
 
 
 func _apply_child_event(id: String) -> void:
+	_log_fact("child", "parent", {"id": id})
 	var warm := Color(0.30, 0.42, 0.22)
 	var cold := Color(0.62, 0.24, 0.18)
 	match id:
@@ -640,6 +902,1838 @@ func debug_scene_panel() -> void:
 	print("[SCENE] 选完 月=", month, " 已过=", scenes_done.size(), " 忙=", busy)
 	var nxt := _due_scene()
 	print("[SCENE] 下个节令=", nxt.get("name", "无"))
+
+
+const KNOWN_TRADES := ["农", "匠", "商", "兵", "吏"]
+const OCCUPATION_FLAGS := ["农家", "匠人", "商贾", "商人", "军户", "士人", "读书"]
+
+
+func _content_issues() -> Array:
+	# M2 地基：内容 ID 与必填字段的静态校验，出错时给断言一个明确的名字
+	var issues: Array = []
+	if EVENTS.is_empty():
+		issues.append("events_missing")
+	var seen_ev := {}
+	for ev in EVENTS:
+		var eid := str((ev as Dictionary).get("id", ""))
+		if eid == "":
+			issues.append("event_without_id")
+			continue
+		if seen_ev.has(eid):
+			issues.append("dup_event:" + eid)
+		seen_ev[eid] = true
+		if str((ev as Dictionary).get("name", "")) == "":
+			issues.append("event_without_name:" + eid)
+		var ma := int((ev as Dictionary).get("min_age", 0))
+		var xa := int((ev as Dictionary).get("max_age", 120))
+		if ma < 0 or ma > 100 or xa < ma:
+			issues.append("event_bad_age:" + eid)
+	var seen_child := {}
+	for ev in CHILD_EVENTS:
+		var cid := str((ev as Dictionary).get("id", ""))
+		if cid == "":
+			issues.append("child_event_without_id")
+		elif seen_child.has(cid):
+			issues.append("dup_child_event:" + cid)
+		seen_child[cid] = true
+	var seen_scene := {}
+	for sc in YEAR_SCENES:
+		var sid := str((sc as Dictionary).get("id", ""))
+		if not SCENE_OPTS.has(sid):
+			issues.append("scene_without_options:" + sid)
+		if seen_scene.has(sid):
+			issues.append("dup_scene:" + sid)
+		seen_scene[sid] = true
+		var opts: Array = SCENE_OPTS.get(sid, [])
+		if opts.size() < 2:
+			issues.append("scene_too_few_options:" + sid)
+		var seen_opt := {}
+		for op in opts:
+			var oid := str((op as Dictionary).get("id", ""))
+			if oid == "":
+				issues.append("scene_option_without_id:" + sid)
+			elif seen_opt.has(oid):
+				issues.append("dup_scene_option:%s:%s" % [sid, oid])
+			seen_opt[oid] = true
+	# 出身：职业 flag 必须能被映射成父亲行当
+	for o in DB.origins:
+		var flags: Array = (o as Dictionary).get("flags", [])
+		if flags.is_empty():
+			issues.append("origin_without_flags:" + str((o as Dictionary).get("name", "?")))
+			continue
+		var covered := false
+		for fl in OCCUPATION_FLAGS:
+			if flags.has(fl):
+				covered = true
+		if not covered:
+			issues.append("origin_without_occupation:" + str((o as Dictionary).get("name", "?")))
+		if not KNOWN_TRADES.has(_father_trade_for(flags)):
+			issues.append("origin_bad_trade:" + str((o as Dictionary).get("name", "?")))
+		if int((o as Dictionary).get("weight", 0)) <= 0:
+			issues.append("origin_bad_weight:" + str((o as Dictionary).get("name", "?")))
+	return issues
+
+
+func _count_facts(kind: String) -> int:
+	var n := 0
+	for f in facts:
+		if str((f as Dictionary).get("kind", "")) == kind:
+			n += 1
+	return n
+
+
+func _run_life_slice(seed_value: int, years: int) -> Dictionary:
+	# M2-05：从出生开始跑一段完整人生，检查每一年的边界与阶段是否都发生
+	ended = false
+	busy = false
+	_init_sim_rng(seed_value)
+	_init_identity()
+	events_enabled = true
+	boundary_log = []
+	var settles := 0
+	var stages: Array = []
+	var money_ok := true
+	var hp_ok := true
+	var guard := 0
+	# 节令会额外推进时间，所以按年龄而不是按迭代次数收口
+	while age < years and not ended and guard < years * 4:
+		guard += 1
+		_advance_months(12)
+		# 模拟玩家：把到期的节令都过掉，选第一项
+		busy = false
+		for i in range(6):
+			var sc := _due_scene()
+			if sc.is_empty():
+				break
+			var sid := str(sc["id"])
+			var opts: Array = SCENE_OPTS.get(sid, [])
+			if opts.is_empty():
+				break
+			_pick_scene_option(sid, str((opts[0] as Dictionary)["id"]))
+		if boundary_log.has("settle"):
+			settles += 1
+		stages.append(_autonomy_stage())
+		if money < 0:
+			money_ok = false
+		if health < 0.0 or health > 100.0:
+			hp_ok = false
+	# 结算次数以事实为准：一次年关一条 year 事实
+	settles = _count_facts("year")
+	return {
+		"age": age,
+		"ended": ended,
+		"settles": settles,
+		"stages": stages,
+		"money_ok": money_ok,
+		"hp_ok": hp_ok,
+		"facts": facts.size(),
+		"dead": (parent_dead as Dictionary).duplicate(true),
+		"scenes": _count_facts("scene"),
+		"child_facts": _count_facts("child"),
+	}
+
+
+func _replay_snapshot() -> Dictionary:
+	# M1-05：黄金重放要能回到同一起点，所以先把会被改动的状态整体存下来
+	return {
+		"year": year, "month": month, "age": age, "money": money,
+		"learning": learning, "craft": craft, "fame": fame,
+		"health": health, "lifespan": lifespan,
+		"craft_rank": craft_rank, "trade_rank": trade_rank, "med_rank": med_rank,
+		"farm_rank": farm_rank, "mil_rank": mil_rank, "women_rank": women_rank,
+		"office_rank": office_rank, "gov_merit": gov_merit, "scandal": scandal,
+		"land": land, "merit": merit, "parents_alive": parents_alive,
+		"story": (story as Dictionary).duplicate(true),
+		"relations": (relations as Dictionary).duplicate(true),
+		"cooldown": (action_cooldown as Dictionary).duplicate(true),
+		"facts": (facts as Array).duplicate(true),
+		"pov_state": (pov_state as Dictionary).duplicate(true), "actor_vitals": (actor_vitals as Dictionary).duplicate(true), "event_instances": (event_instances as Array).duplicate(true), "event_seq": event_seq, "opp_last": (opp_last as Dictionary).duplicate(true),
+		"parent_dead": (parent_dead as Dictionary).duplicate(true),
+		"parent_death_year": (parent_death_year as Dictionary).duplicate(true),
+		"last_settled_year": last_settled_year,
+		"events": events_enabled,
+		"save_future": save_future,
+		"ended": ended,
+	}
+
+
+func _replay_restore(snap: Dictionary) -> void:
+	year = int(snap["year"])
+	month = int(snap["month"])
+	age = int(snap["age"])
+	money = int(snap["money"])
+	learning = float(snap["learning"])
+	craft = float(snap["craft"])
+	fame = float(snap["fame"])
+	health = float(snap["health"])
+	lifespan = int(snap["lifespan"])
+	craft_rank = int(snap["craft_rank"])
+	trade_rank = int(snap["trade_rank"])
+	med_rank = int(snap["med_rank"])
+	farm_rank = int(snap["farm_rank"])
+	mil_rank = int(snap["mil_rank"])
+	women_rank = int(snap["women_rank"])
+	office_rank = int(snap["office_rank"])
+	gov_merit = int(snap["gov_merit"])
+	scandal = int(snap["scandal"])
+	land = int(snap["land"])
+	merit = int(snap["merit"])
+	parents_alive = int(snap["parents_alive"])
+	story = (snap["story"] as Dictionary).duplicate(true)
+	relations = (snap["relations"] as Dictionary).duplicate(true)
+	action_cooldown = (snap["cooldown"] as Dictionary).duplicate(true)
+	facts = (snap["facts"] as Array).duplicate(true)
+	pov_state = (snap["pov_state"] as Dictionary).duplicate(true)
+	actor_vitals = (snap["actor_vitals"] as Dictionary).duplicate(true)
+	event_instances = (snap["event_instances"] as Array).duplicate(true)
+	event_seq = int(snap["event_seq"])
+	opp_last = (snap["opp_last"] as Dictionary).duplicate(true)
+	parent_dead = (snap["parent_dead"] as Dictionary).duplicate(true)
+	parent_death_year = (snap["parent_death_year"] as Dictionary).duplicate(true)
+	last_settled_year = int(snap["last_settled_year"])
+	events_enabled = bool(snap["events"])
+	save_future = bool(snap["save_future"])
+	ended = bool(snap["ended"])
+
+
+func _replay_digest(seed_value: int) -> String:
+	# 固定起点 + 固定命令序列 + 固定种子 → 一份状态摘要
+	_init_sim_rng(seed_value)
+	year = 1046
+	month = 1
+	age = 20
+	money = 1000
+	learning = 20.0
+	craft = 10.0
+	fame = 10.0
+	health = 80.0
+	lifespan = 70
+	craft_rank = 0
+	trade_rank = 0
+	med_rank = 0
+	farm_rank = 0
+	mil_rank = 0
+	women_rank = 0
+	office_rank = 0
+	gov_merit = 0
+	scandal = 0
+	land = 0
+	merit = 0
+	parents_alive = 2
+	story.clear()
+	relations.clear()
+	action_cooldown.clear()
+	facts.clear()
+	last_settled_year = 1045
+	events_enabled = false
+	var study := {"label": "replay_study", "months": 1, "gain": {"learning": 2}}
+	var work := {"label": "replay_work", "months": 1, "gain": {"money": 120}}
+	var long_act := {"label": "replay_long", "months": 12, "gain": {"money": 2000, "health": -2}}
+	_advance_months(1)
+	_on_action(study)
+	_advance_months(1)
+	_on_action(work)
+	_advance_months(1)
+	_on_action(study)
+	_on_action(long_act)
+	# 纳入两条随机流的抽取，种子才会体现在摘要里
+	money += _rndi(0, 500)
+	learning += float(_arndi(0, 5))
+	var parts: Array = [
+		"y%d" % year, "m%d" % month, "a%d" % age, "money%d" % money,
+		"l%.2f" % learning, "c%.2f" % craft, "f%.2f" % fame, "hp%.2f" % health,
+		"rank%d%d%d%d%d%d" % [craft_rank, trade_rank, med_rank, farm_rank, mil_rank, women_rank],
+		"pov%d" % parents_alive, "facts%d" % facts.size(), "story%d" % story.size(),
+	]
+	return "|".join(parts)
+
+
+func _run_continuity_a(seed_value: String, steps: int, out_path: String, scenario: String = "plain") -> void:
+	_continuity_start(int(seed_value), scenario)
+	_continuity_run(steps)
+	_save_game()
+	_continuity_dump(out_path, _continuity_snapshot())
+	get_tree().quit(0)
+
+
+func _run_continuity_b(steps: int, out0: String, out1: String) -> void:
+	# 新进程读档：不重新播种、不带 --fresh、不手工补字段
+	var ok := _load_game()
+	if not ok:
+		print("[CONT] load_failed")
+		get_tree().quit(2)
+		return
+	_continuity_dump(out0, _continuity_snapshot())
+	_continuity_run(steps)
+	_continuity_dump(out1, _continuity_snapshot())
+	get_tree().quit(0)
+
+
+func _run_continuity_c(seed_value: String, steps: int, steps2: int, out_path: String, scenario: String = "plain") -> void:
+	_continuity_start(int(seed_value), scenario)
+	_continuity_run(steps + steps2)
+	_continuity_dump(out_path, _continuity_snapshot())
+	get_tree().quit(0)
+
+
+func _continuity_start(seed_value: int, scenario: String = "plain") -> void:
+
+	# 固定起点：先定随机种子，再生成身份；清掉所有会跨进程比较的状态
+	ended = false
+	busy = false
+	_init_sim_rng(seed_value)
+	_init_identity()
+	events_enabled = true
+	boundary_log = []
+	event_instances = []
+	event_seq = 0
+	facts = []
+	fact_seq = 0
+	fact_floor = 0
+	last_event_fid = 0
+	last_boundary_fid = 0
+	relations = {}
+	action_cooldown = {}
+	parent_dead = {"father": false, "mother": false}
+	parent_death_year = {"father": 0, "mother": 0}
+	parents_alive = 2
+	last_settled_year = year - 1
+	scenes_done = {}
+	month_frac = 0.0
+	if not pov_state.has("child"):
+		pov_state["child"] = _capture_pov()
+	_continuity_scenario(scenario)
+
+
+func _continuity_scenario(scenario: String) -> void:
+	# 各场景都从同一个固定起点出发；这里只做确定性的布置
+	match scenario:
+		"pending":
+			# 父亲视角，带两条未到期事件（一条排给父亲，一条排给母亲）
+			_switch_pov("father")
+			_enqueue_event("drought", "pending_a", _month_index() + 8, 0, "father", "cancel")
+			_enqueue_event("plague", "pending_b", _month_index() + 9, 0, "mother", "transfer")
+		"death":
+			# 父亲视角，孩子只剩 1 点健康，致死事件排在次月，奖励排在同月之后
+			_switch_pov("father")
+			actor_vitals["child"] = {"age": 10, "health": 1.0, "lifespan": 60}
+			_enqueue_event("drought", "death_hit", _month_index() + 4, 0, "child", "cancel")
+			_enqueue_event("reward", "death_after", _month_index() + 4, 0, "mother", "cancel")
+		"frac":
+			# 非零月内进度：保存点落在月中间
+			month_frac = 0.42
+		_:
+			pass
+
+
+func _continuity_run(steps: int) -> void:
+	# 固定命令序列：节令能过就过（选第一项），每月推进一格，每三月读一次书
+	for i in range(steps):
+		if ended:
+			return
+		busy = false
+		var sc := _due_scene()
+		if not sc.is_empty():
+			var sid := str(sc["id"])
+			var opts: Array = SCENE_OPTS.get(sid, [])
+			if not opts.is_empty():
+				_pick_scene_option(sid, str((opts[0] as Dictionary)["id"]))
+		if _month_index() % 3 == 0:
+			_on_action({"label": "cont_study", "months": 1, "gain": {"learning": 1}})
+		_advance_months(1)
+
+
+func _continuity_active_fields() -> Dictionary:
+	# 只读：从正在使用的真实字段读取当前人物；不切视角、不写回缓存
+	var row := {"age": age, "health": health, "lifespan": lifespan}
+	for f in POV_FIELDS:
+		row[str(f)] = get(str(f))
+	row["story"] = (story as Dictionary).duplicate(true)
+	row["build"] = (player_build as Dictionary).duplicate(true)
+	return row
+
+
+func _continuity_snapshot() -> Dictionary:
+	# 从运行中的权威状态导出，不复用存档字段清单
+	var actors := {}
+	for id in ["child", "father", "mother"]:
+		var who := str(id)
+		var v := _vitals_of(who)
+		actors[who] = {
+			"age": int(v["age"]), "health": float(v["health"]), "lifespan": int(v["lifespan"]),
+			"dead": _actor_is_dead(who),
+			"row": (pov_state.get(who, {}) as Dictionary).duplicate(true),
+		}
+	return {
+		"schema": SAVE_SCHEMA_VERSION,
+		"seed": sim_seed,
+		"pov": pov,
+		"year": year, "month": month, "month_frac": month_frac, "time_scale": time_scale,
+		"money": money,
+		"active": _continuity_active_fields(),
+		"actors": actors,
+		"household": {"parents_alive": parents_alive, "married": married, "children": children, "land": land},
+		"relations": (relations as Dictionary).duplicate(true),
+		"cooldown": (action_cooldown as Dictionary).duplicate(true),
+		"queue": (event_instances as Array).duplicate(true),
+		"event_seq": event_seq,
+		"facts": (facts as Array).duplicate(true),
+		"fact_seq": fact_seq, "fact_floor": fact_floor,
+		"last_settled_year": last_settled_year,
+		"parent_dead": (parent_dead as Dictionary).duplicate(true),
+		"parent_death_year": (parent_death_year as Dictionary).duplicate(true),
+		"rng": {"world": str(rng_world.state), "actor": str(rng_actor.state), "birth": str(rng_birth.state)},
+		"scenes_done": (scenes_done as Dictionary).duplicate(true),
+		"opp_last": (opp_last as Dictionary).duplicate(true),
+		"watermarks": {
+			"last_event_fid": last_event_fid, "last_boundary_fid": last_boundary_fid,
+			"boundary_log": boundary_log.duplicate(true),
+		},
+		"milestones": (milestones as Dictionary).duplicate(true),
+		"child_last": child_last,
+		"shop": {"open": shop_open, "label": shop_label, "level": shop_level,
+			"data": (shop as Dictionary).duplicate(true)},
+		"identity": {"name": name_text, "place": place, "birth_year": birth_year,
+			"father": father_name, "mother": mother_name},
+		"frac_probe": int(month_frac + 0.58),
+	}
+
+
+func _continuity_dump(path: String, data: Dictionary) -> void:
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	if f == null:
+		print("[CONT] cannot_write ", path)
+		return
+	f.store_string(JSON.stringify(data, "  "))
+	f.close()
+	print("[CONT] wrote ", path, " bytes=", JSON.stringify(data).length())
+
+
+func _run_verify_smoke() -> void:
+	# 行为断言入口：失败必须以非零退出码结束，供 tools/verify.ps1 判定
+	busy = false
+	var fails: Array = []
+	var oks := 0
+
+	if OS.get_user_data_dir().find("LifeVerify") >= 0:
+		oks += 1
+		print("[VERIFY] PASS isolated_user_dir ", OS.get_user_data_dir())
+	else:
+		fails.append("isolated_user_dir")
+		print("[VERIFY] FAIL isolated_user_dir ", OS.get_user_data_dir())
+
+	if DB.origins.size() == 10:
+		oks += 1
+		print("[VERIFY] PASS origins_count 10")
+	else:
+		fails.append("origins_count")
+		print("[VERIFY] FAIL origins_count ", DB.origins.size())
+
+	if age == 0 and not can_walk:
+		oks += 1
+		print("[VERIFY] PASS newborn_state age=0 can_walk=false")
+	else:
+		fails.append("newborn_state")
+		print("[VERIFY] FAIL newborn_state age=", age, " can_walk=", can_walk)
+
+	var money_before := money
+	money = 12345
+	_save_game()
+	money = 1
+	var loaded := _load_game()
+	if loaded and money == 12345:
+		oks += 1
+		print("[VERIFY] PASS save_roundtrip money=12345")
+	else:
+		fails.append("save_roundtrip")
+		print("[VERIFY] FAIL save_roundtrip loaded=", loaded, " money=", money)
+	money = money_before
+
+	if pov_state.has("father") and pov_state.has("mother"):
+		oks += 1
+		print("[VERIFY] PASS parents_present")
+	else:
+		fails.append("parents_present")
+		print("[VERIFY] FAIL parents_present ", pov_state.keys())
+
+	# A09：出身 flag → 父亲行当 的接线
+	if _father_trade_for(["商贾"]) == "商" and _father_trade_for(["匠人"]) == "匠" \
+			and _father_trade_for(["军户"]) == "兵" and _father_trade_for(["士人"]) == "吏" \
+			and _father_trade_for(["农家"]) == "农":
+		oks += 1
+		print("[VERIFY] PASS father_trade_mapping")
+	else:
+		fails.append("father_trade_mapping")
+		print("[VERIFY] FAIL father_trade_mapping")
+
+	# A09：数据里真实存在「商贾」出身，且能被映射成商人
+	var merchant_found := false
+	var merchant_ok := false
+	for o in DB.origins:
+		var of: Array = o.get("flags", [])
+		if of.has("商贾"):
+			merchant_found = true
+			merchant_ok = _father_trade_for(of) == "商"
+	if merchant_found and merchant_ok:
+		oks += 1
+		print("[VERIFY] PASS merchant_origin_wired")
+	else:
+		fails.append("merchant_origin_wired")
+		print("[VERIFY] FAIL merchant_origin_wired found=", merchant_found, " ok=", merchant_ok)
+
+	# 内容 ID 唯一：NPC 不允许重复 id
+	var seen_ids := {}
+	var dup_id := ""
+	for n in npcs:
+		var nid := str(n.get("id", ""))
+		if nid == "":
+			continue
+		if seen_ids.has(nid):
+			dup_id = nid
+		seen_ids[nid] = true
+	if dup_id == "":
+		oks += 1
+		print("[VERIFY] PASS npc_ids_unique count=", seen_ids.size())
+	else:
+		fails.append("npc_ids_unique")
+		print("[VERIFY] FAIL npc_ids_unique duplicate=", dup_id)
+
+	# A02：完整存档往返（父亲行当/母亲性情/妇业/节令/流速/童年去重）
+	var keep := {
+		"ft": father_trade, "mt": mother_temper, "wr": women_rank,
+		"cl": child_last, "ts": time_scale,
+		"sd": (scenes_done as Dictionary).duplicate(true),
+	}
+	father_trade = "匠"
+	mother_temper = "严"
+	women_rank = 3
+	child_last = "wood"
+	time_scale = 600.0
+	scenes_done = {"1046_qingming": true}
+	_save_game()
+	father_trade = "农"
+	mother_temper = "和"
+	women_rank = 0
+	child_last = ""
+	time_scale = 1.0
+	scenes_done = {}
+	save_schema_seen = 0
+	var ok_full := _load_game()
+	if ok_full and father_trade == "匠" and mother_temper == "严" and women_rank == 3 \
+			and child_last == "wood" and is_equal_approx(time_scale, 600.0) \
+			and scenes_done.has("1046_qingming") and save_schema_seen == SAVE_SCHEMA_VERSION:
+		oks += 1
+		print("[VERIFY] PASS save_roundtrip_full schema=", save_schema_seen)
+	else:
+		fails.append("save_roundtrip_full")
+		print("[VERIFY] FAIL save_roundtrip_full ", father_trade, "/", mother_temper, "/",
+			women_rank, "/", child_last, "/", time_scale, "/", scenes_done, "/", save_schema_seen)
+	father_trade = str(keep["ft"])
+	mother_temper = str(keep["mt"])
+	women_rank = int(keep["wr"])
+	child_last = str(keep["cl"])
+	time_scale = float(keep["ts"])
+	scenes_done = (keep["sd"] as Dictionary).duplicate(true)
+
+	# A03：已故父母不能因为读档被复活
+	parent_dead["father"] = true
+	parent_death_year["father"] = 1050
+	_save_game()
+	parent_dead["father"] = false
+	parent_death_year["father"] = 0
+	var ok_dead := _load_game()
+	var pov_before := pov
+	_switch_pov("father")
+	if ok_dead and bool(parent_dead["father"]) and int(parent_death_year["father"]) == 1050 \
+			and pov == "child" and pov_state.has("father"):
+		oks += 1
+		print("[VERIFY] PASS dead_parent_stays_dead")
+	else:
+		fails.append("dead_parent_stays_dead")
+		print("[VERIFY] FAIL dead_parent_stays_dead ok=", ok_dead, " dead=", parent_dead,
+			" pov=", pov, " has=", pov_state.has("father"))
+	parent_dead["father"] = false
+	parent_death_year["father"] = 0
+	pov = pov_before
+
+	# A02：写入中断/损坏可回退备份
+	money = 100
+	_save_game()
+	money = 200
+	_save_game()
+	var main_abs := ProjectSettings.globalize_path(_save_file())
+	var broken := FileAccess.open(_save_file(), FileAccess.WRITE)
+	if broken != null:
+		broken.store_string("{ this is not json")
+		broken.close()
+	money = 0
+	var ok_backup := _load_game()
+	if ok_backup and recovered_from_backup and money == 100:
+		oks += 1
+		print("[VERIFY] PASS save_recovers_from_backup money=", money)
+	else:
+		fails.append("save_recovers_from_backup")
+		print("[VERIFY] FAIL save_recovers_from_backup ok=", ok_backup,
+			" recovered=", recovered_from_backup, " money=", money)
+	recovered_from_backup = false
+
+	recovered_from_backup = false
+
+	# 旧档迁移：schema_version=1（无新字段）能读、有明确默认、再存即升级
+	var fx := FileAccess.open("res://tests/fixtures/save_v1.json", FileAccess.READ)
+	if fx != null:
+		var legacy_text := fx.get_as_text()
+		fx.close()
+		var w := FileAccess.open(_save_file(), FileAccess.WRITE)
+		if w != null:
+			w.store_string(legacy_text)
+			w.close()
+		var ok_v1 := _load_game()
+		var v1_defaults: bool = father_trade == "农" and women_rank == 0 \
+			and is_equal_approx(time_scale, 1.0) and save_schema_seen == 1 \
+			and name_text == "李守拙" and money == 3456 and mother_temper == "和"
+		# 迁移应体现在下一次保存
+		_save_game()
+		var reread := _read_save_dict(_save_file())
+		var upgraded: bool = int(reread.get("schema_version", 0)) == SAVE_SCHEMA_VERSION
+		if ok_v1 and v1_defaults and upgraded:
+			oks += 1
+			print("[VERIFY] PASS save_migrates_v1 upgraded_to=", reread.get("schema_version", 0))
+		else:
+			fails.append("save_migrates_v1")
+			print("[VERIFY] FAIL save_migrates_v1 ok=", ok_v1, " defaults=", v1_defaults,
+				" upgraded=", upgraded, " ft=", father_trade, " wr=", women_rank,
+				" ts=", time_scale, " schema=", save_schema_seen)
+	else:
+		fails.append("save_migrates_v1")
+		print("[VERIFY] FAIL save_migrates_v1 fixture_missing")
+	save_schema_seen = SAVE_SCHEMA_VERSION
+
+	# M1-02：同一件事不能靠连点反复刷收益（冷却 = 声明的 months）
+	action_cooldown = {}
+	money = 500
+	var keep_age2 := age
+	age = 5  # 避开年关结算，只观察收益是否重复
+	var spam := {"label": "测试短活", "months": 1, "gain": {"money": 300}}
+	_on_action(spam)
+	var after_first := money
+	_on_action(spam)
+	var after_second := money
+	age = keep_age2
+	if after_first == 800 and after_second == 800:
+		oks += 1
+		print("[VERIFY] PASS action_cooldown_blocks_spam money=", after_second)
+	else:
+		fails.append("action_cooldown_blocks_spam")
+		print("[VERIFY] FAIL action_cooldown_blocks_spam first=", after_first, " second=", after_second)
+	action_cooldown = {}
+
+	# M1-02b：年关每年只结算一次（防重入）
+	var keep_money2 := money
+	var keep_age3 := age
+	var keep_settled := last_settled_year
+	age = 30
+	money = 10000
+	last_settled_year = year - 1
+	_on_new_year()
+	var once := money
+	_on_new_year()
+	if once < 10000 and money == once:
+		oks += 1
+		print("[VERIFY] PASS new_year_settles_once deducted=", 10000 - once)
+	else:
+		fails.append("new_year_settles_once")
+		print("[VERIFY] FAIL new_year_settles_once once=", once, " twice=", money)
+	money = keep_money2
+	age = keep_age3
+	last_settled_year = keep_settled
+
+	# M1-02c：不操控父母时，他们的老化与死亡照样发生
+	var keep_father: Dictionary = (pov_state.get("father", {}) as Dictionary).duplicate(true)
+	var keep_settled2 := last_settled_year
+	var keep_hp2 := health
+	var keep_fa: Dictionary = (actor_vitals.get("father", {}) as Dictionary).duplicate(true)
+	actor_vitals["father"] = {"age": 55, "health": 40.0, "lifespan": 90}
+	var f_state: Dictionary = actor_vitals["father"]
+	actor_vitals["father"] = f_state
+	health = 60.0
+	last_settled_year = year - 1
+	var keep_money3 := money
+	var keep_events := events_enabled
+	events_enabled = false  # 年度随机事件会扣血扣钱，先关掉只看老化
+	money = 50000  # 保证年关付得起，不触发"欠年"扣血
+	_on_new_year()
+	events_enabled = keep_events
+	var father_hp := float(_vitals_of("father")["health"])
+	if is_equal_approx(father_hp, 39.2) and is_equal_approx(health, 60.0):
+		oks += 1
+		print("[VERIFY] PASS actors_age_independently father_hp=", father_hp, " self_hp=", health)
+	else:
+		fails.append("actors_age_independently")
+		print("[VERIFY] FAIL actors_age_independently father_hp=", father_hp, " self_hp=", health)
+	actor_vitals["father"] = keep_fa
+	last_settled_year = keep_settled2
+	health = keep_hp2
+	money = keep_money3
+
+	# M1-03：同种子得到同一串抽取；存读档后抽取接着走
+	_init_sim_rng(12345)
+	var seq_a: Array = []
+	for i in range(6):
+		seq_a.append(_rndi(0, 99))
+	_init_sim_rng(12345)
+	var seq_b: Array = []
+	for i in range(6):
+		seq_b.append(_rndi(0, 99))
+	_init_sim_rng(777)
+	_rndi(0, 99)
+	_save_game()
+	var expected_next := _rndi(0, 999)
+	_init_sim_rng(1)
+	var ok_rng_load := _load_game()
+	var actual_next := _rndi(0, 999)
+	if seq_a == seq_b and ok_rng_load and actual_next == expected_next:
+		oks += 1
+		print("[VERIFY] PASS rng_reproducible seq=", seq_a.slice(0, 3), " resume=", actual_next)
+	else:
+		fails.append("rng_reproducible")
+		print("[VERIFY] FAIL rng_reproducible same=", seq_a == seq_b,
+			" loaded=", ok_rng_load, " expected=", expected_next, " actual=", actual_next)
+	_init_sim_rng(4242)
+
+	# M1-03d：世界流与人物决策流互不干扰（各自的抽取不影响对方）
+	_init_sim_rng(2025)
+	var actor_seq_a: Array = []
+	for i in range(3):
+		actor_seq_a.append(_arndi(0, 999))
+	_init_sim_rng(2025)
+	for i in range(7):
+		_rndi(0, 999)
+	var actor_seq_b: Array = []
+	for i in range(3):
+		actor_seq_b.append(_arndi(0, 999))
+	if actor_seq_a == actor_seq_b:
+		oks += 1
+		print("[VERIFY] PASS rng_streams_independent actor=", actor_seq_a)
+	else:
+		fails.append("rng_streams_independent")
+		print("[VERIFY] FAIL rng_streams_independent a=", actor_seq_a, " b=", actor_seq_b)
+	_init_sim_rng(4242)
+
+	# M1-03b：事实日志每条都要有类型与起因，时间不回退
+	facts = []
+	# 事件事实改由 _drain_due_events 记录，所以这里走完整的入队→到期路径
+	event_instances = []
+	event_seq = 0
+	_enqueue_event("drought", "year_end", _month_index())
+	_drain_due_events()
+	event_instances = []
+	_log_fact("exam", "test_cause", {"note": "x"})
+	var ok_facts := facts.size() >= 2
+	var last_t := -1
+	for f in facts:
+		var fd: Dictionary = f
+		if str(fd.get("kind", "")) == "" or str(fd.get("cause", "")) == "":
+			ok_facts = false
+		if int(fd.get("t", 0)) < last_t:
+			ok_facts = false
+		last_t = int(fd.get("t", 0))
+	var kinds: Array = []
+	for f in facts:
+		kinds.append(str((f as Dictionary).get("kind", "")))
+	if ok_facts and kinds.has("event"):
+		oks += 1
+		print("[VERIFY] PASS facts_have_causes kinds=", kinds)
+	else:
+		fails.append("facts_have_causes")
+		print("[VERIFY] FAIL facts_have_causes ok=", ok_facts, " kinds=", kinds)
+	facts = []
+
+	# M1-03c：墓志引用事实日志
+	facts = []
+	var no_trace := _facts_trace() == ""
+	_log_fact("exam", "jieshi_pass", {"year": year})
+	_log_fact("exam", "jieshi_fail", {"year": year})
+	_log_fact("event", "year_end", {"id": "drought"})
+	var with_trace := _facts_trace()
+	var in_epitaph := false
+	for line in _epitaph():
+		if str(line).begins_with("一生所记"):
+			in_epitaph = true
+	if no_trace and with_trace.find("应试2次") >= 0 and in_epitaph:
+		oks += 1
+		print("[VERIFY] PASS epitaph_uses_facts ", with_trace)
+	else:
+		fails.append("epitaph_uses_facts")
+		print("[VERIFY] FAIL epitaph_uses_facts empty_ok=", no_trace,
+			" trace=", with_trace, " in_epitaph=", in_epitaph)
+	facts = []
+
+	# M1-01a：关系不随场景重建与存读档丢失
+	relations = {}
+	_set_att("li_shen", 25)
+	_spawn_npcs()
+	var att_after_rebuild := _get_att("li_shen")
+	_save_game()
+	relations = {}
+	_load_game()
+	var att_after_load := _get_att("li_shen")
+	if att_after_rebuild == 25 and att_after_load == 25:
+		oks += 1
+		print("[VERIFY] PASS relations_survive_rebuild rebuild=", att_after_rebuild,
+			" load=", att_after_load)
+	else:
+		fails.append("relations_survive_rebuild")
+		print("[VERIFY] FAIL relations_survive_rebuild rebuild=", att_after_rebuild,
+			" load=", att_after_load)
+	relations = {}
+
+	# 行动标识稳定：有 id 时改文案/月数仍是同一个冷却；没有 id 时按内容签名
+	var key_a := _action_key({"label": "读书", "months": 1, "gain": {"learning": 1}})
+	var key_b := _action_key({"label": "读书", "months": 1, "gain": {"learning": 1}})
+	var key_c := _action_key({"id": "study", "label": "读书", "months": 1})
+	var key_d := _action_key({"id": "study", "label": "苦读", "months": 3})
+	if key_a == key_b and key_c == key_d and key_a != key_c:
+		oks += 1
+		print("[VERIFY] PASS action_key_stable sig=", key_b, " id=", key_c)
+	else:
+		fails.append("action_key_stable")
+		print("[VERIFY] FAIL action_key_stable ", key_a, " / ", key_b, " / ", key_c, " / ", key_d)
+
+	# 事件挑选走已保存的模拟流：推进全局 RNG 不影响同一 seed 的选择
+	var pool := [{"id": "a"}, {"id": "b"}, {"id": "c"}, {"id": "d"}, {"id": "e"}, {"id": "f"}]
+	_init_sim_rng(4242)
+
+
+	var pick1 := str(_pick_from(pool)["id"])
+	for i in range(9):
+		randf()
+	_init_sim_rng(4242)
+
+
+	var pick2 := str(_pick_from(pool)["id"])
+	if pick1 == pick2:
+		oks += 1
+		print("[VERIFY] PASS events_use_saved_rng pick=", pick1)
+	else:
+		fails.append("events_use_saved_rng")
+		print("[VERIFY] FAIL events_use_saved_rng ", pick1, " != ", pick2)
+
+	# 未来版本的存档：拒绝加载、也拒绝覆盖
+	var fut := _state_dict()
+	fut["schema_version"] = SAVE_SCHEMA_VERSION + 1
+	var fw := FileAccess.open(_save_file(), FileAccess.WRITE)
+	if fw != null:
+		fw.store_string(JSON.stringify(fut))
+		fw.close()
+	var fut_before := _read_save_dict(_save_file())
+	save_future = false
+	var ok_fut := _load_game()
+	_save_game()
+	var fut_after := _read_save_dict(_save_file())
+	var fut_kept: bool = int(fut_after.get("schema_version", 0)) == SAVE_SCHEMA_VERSION + 1
+	if (not ok_fut) and save_future and fut_kept and not fut_before.is_empty():
+		oks += 1
+		print("[VERIFY] PASS save_rejects_future_version kept=", fut_after.get("schema_version", 0))
+	else:
+		fails.append("save_rejects_future_version")
+		print("[VERIFY] FAIL save_rejects_future_version loaded=", ok_fut,
+			" future_flag=", save_future, " kept=", fut_kept)
+	save_future = false
+
+	# 父母死亡只结算一次：重复调用不得再扣 parents_alive 或再记一条
+	parent_dead["father"] = false
+	parent_death_year["father"] = 0
+	parents_alive = 2
+	_switch_pov("father")
+	var death_facts_before := 0
+	for f in facts:
+		if str((f as Dictionary).get("kind", "")) == "death":
+			death_facts_before += 1
+	_parent_death()
+	var alive_after_first := parents_alive
+	pov = "father"  # 强行回到父亲视角，模拟重复结算
+	_parent_death()
+	var alive_after_second := parents_alive
+	var death_facts_after := 0
+	for f in facts:
+		if str((f as Dictionary).get("kind", "")) == "death":
+			death_facts_after += 1
+	if alive_after_first == 1 and alive_after_second == 1 \
+			and death_facts_after == death_facts_before + 1:
+		oks += 1
+		print("[VERIFY] PASS parent_death_settled_once alive=", alive_after_second)
+	else:
+		fails.append("parent_death_settled_once")
+		print("[VERIFY] FAIL parent_death_settled_once first=", alive_after_first,
+			" second=", alive_after_second, " facts=", death_facts_before, "->", death_facts_after)
+	pov = "child"
+	parent_dead["father"] = false
+	parent_death_year["father"] = 0
+	parents_alive = 2
+
+	# 父亲在长行动中死去：视角切回孩子，这份收益不能记到孩子头上
+	var keep_money4 := money
+	var keep_age4 := age
+	var keep_life4 := lifespan
+	money = 1000
+	_switch_pov("father")
+	age = lifespan
+	health = 50.0
+	parent_dead["father"] = false
+	_on_action({"label": "守灵长活", "months": 12, "gain": {"money": 5000}})
+	var reward_ok: bool = money == 1000 and pov == "child" and bool(parent_dead.get("father", false))
+	if reward_ok:
+		oks += 1
+		print("[VERIFY] PASS action_pov_change_no_reward money=", money, " pov=", pov)
+	else:
+		fails.append("action_pov_change_no_reward")
+		print("[VERIFY] FAIL action_pov_change_no_reward money=", money, " pov=", pov,
+			" dead=", parent_dead)
+	parent_dead["father"] = false
+	parent_death_year["father"] = 0
+	parents_alive = 2
+	money = keep_money4
+	age = keep_age4
+	lifespan = keep_life4
+
+	# 年关按户结算：扣的钱来自全家人口，不是当前视角那一个人的年龄
+	var keep_money5 := money
+	var keep_settled5 := last_settled_year
+	var keep_age5 := age
+	var keep_events5 := events_enabled
+	var keep_states5: Dictionary = (pov_state as Dictionary).duplicate(true)
+	events_enabled = false
+	# 把家人调到不会在年关当场病故的状态，否则这一年的户内人口会变
+	for k5 in pov_state.keys():
+		var st5: Dictionary = pov_state[k5]
+		st5["health"] = 95.0
+		st5["lifespan"] = 99
+		if int(st5.get("age", 0)) > 60:
+			st5["age"] = 40
+		actor_vitals[k5] = st5
+	age = 10
+	money = 50000
+	last_settled_year = year - 1
+	var expected_cost := _household_year_cost()
+	_on_new_year()
+	var paid := 50000 - money
+	events_enabled = keep_events5
+	pov_state = keep_states5
+	last_settled_year = keep_settled5
+	money = keep_money5
+	age = keep_age5
+	if paid == expected_cost and paid > 300 + 10 * 4:
+		oks += 1
+		print("[VERIFY] PASS household_year_cost paid=", paid, " single_actor_would_be=", 300 + 10 * 4)
+	else:
+		fails.append("household_year_cost")
+		print("[VERIFY] FAIL household_year_cost paid=", paid, " expected=", expected_cost)
+
+	# M1-05：黄金重放——同种子同命令必须得到同一份状态摘要
+	var snap5 := _replay_snapshot()
+	var digest_a := _replay_digest(4321)
+	_replay_restore(snap5)
+	var digest_b := _replay_digest(4321)
+	_replay_restore(snap5)
+	var digest_c := _replay_digest(9999)
+	_replay_restore(snap5)
+	_init_sim_rng(4242)
+	if digest_a == digest_b and digest_a != digest_c:
+		oks += 1
+		print("[VERIFY] PASS golden_replay digest=", digest_a)
+	else:
+		fails.append("golden_replay")
+		print("[VERIFY] FAIL golden_replay a=", digest_a, " b=", digest_b, " other_seed=", digest_c)
+
+	# M1-05b：一年里的阶段顺序固定为 老化 → 结算 → 事件；死者不再经历结算
+	var keep_settled6 := last_settled_year
+	var keep_events6 := events_enabled
+	events_enabled = false
+	last_settled_year = year - 1
+	var keep_age6 := age
+	age = 30
+	_on_new_year()
+	var order_ok := boundary_log.size() >= 3 and str(boundary_log[0]) == "aging" \
+		and boundary_log.has("settle") and boundary_log.has("events") \
+		and boundary_log.find("settle") < boundary_log.find("events")
+	if order_ok:
+		oks += 1
+		print("[VERIFY] PASS year_boundary_order ", boundary_log)
+	else:
+		fails.append("year_boundary_order")
+		print("[VERIFY] FAIL year_boundary_order ", boundary_log)
+
+	# 同 tick 内死亡先于结算：死了就不再扣年关、不再发生事件
+	var keep_money6 := money
+	var keep_age7 := age
+	var keep_hp6 := health
+	var keep_life6 := lifespan
+	age = 50
+	health = 0.5
+	lifespan = 90
+	money = 10000
+	last_settled_year = year - 1
+	_on_new_year()
+	var death_first: bool = boundary_log == ["aging", "death_active"] and money == 10000 and ended
+	if death_first:
+		oks += 1
+		print("[VERIFY] PASS death_before_settle ", boundary_log, " money=", money)
+	else:
+		fails.append("death_before_settle")
+		print("[VERIFY] FAIL death_before_settle ", boundary_log, " money=", money, " ended=", ended)
+	ended = false
+	busy = false
+	money = keep_money6
+	age = keep_age7
+	health = keep_hp6
+	lifespan = keep_life6
+	last_settled_year = keep_settled6
+	events_enabled = keep_events6
+	age = keep_age6
+
+	# M1-01b：三个人的年龄/健康/寿数各存一份，换视角来回切不丢
+	if pov != "child":
+		_switch_pov("child")
+	# 孩子此刻的真值就是全局字段，先记下来再改父母
+	var child_v: Dictionary = _vitals_of("child").duplicate(true)
+	actor_vitals["father"] = {"age": 44, "health": 66.0, "lifespan": 70}
+	actor_vitals["mother"] = {"age": 41, "health": 58.0, "lifespan": 72}
+	_switch_pov("father")
+	var f_ok: bool = age == 44 and is_equal_approx(health, 66.0) and lifespan == 70
+	_switch_pov("mother")
+	var m_ok: bool = age == 41 and is_equal_approx(health, 58.0) and lifespan == 72
+	_switch_pov("child")
+	var c_ok: bool = age == int(child_v["age"]) and is_equal_approx(health, float(child_v["health"])) \
+			and lifespan == int(child_v["lifespan"])
+	var f_back: Dictionary = _vitals_of("father")
+	if f_ok and m_ok and c_ok and int(f_back["age"]) == 44:
+		oks += 1
+		print("[VERIFY] PASS actor_vitals_roundtrip father=", f_back)
+	else:
+		fails.append("actor_vitals_roundtrip")
+		print("[VERIFY] FAIL actor_vitals_roundtrip f=", f_ok, " m=", m_ok, " c=", c_ok, " back=", f_back)
+
+	# M2 地基：内容 ID 与必填字段的静态校验
+	var c_issues := _content_issues()
+	if c_issues.is_empty():
+		oks += 1
+		print("[VERIFY] PASS content_ids_valid events=", EVENTS.size(), " scenes=", YEAR_SCENES.size())
+	else:
+		fails.append("content_ids_valid")
+		print("[VERIFY] FAIL content_ids_valid ", c_issues)
+
+	# M2-01：事件实例——到期才触发，且只触发一次
+	event_instances = []
+	event_seq = 0
+	var keep_inst_age := age
+	age = 30
+	var sid_due := _enqueue_event("drought", "year_end", _month_index())
+	var sid_future := _enqueue_event("plague", "year_end", _month_index() + 3)
+	var fired_first := _drain_due_events()
+	var queue_after_first := event_instances.size()
+	var fired_again := _drain_due_events()
+	# 把未来的那条挪到现在，再抽一次
+	for inst in event_instances:
+		if int((inst as Dictionary).get("sid", 0)) == sid_future:
+			inst["due"] = _month_index()
+	var fired_third := _drain_due_events()
+	var fired_fourth := _drain_due_events()
+	var instance_ok: bool = (
+		fired_first == 1 and queue_after_first == 1
+		and fired_again == 0 and fired_third == 1 and fired_fourth == 0
+		and sid_due != sid_future and event_instances.is_empty()
+	)
+	if instance_ok:
+		oks += 1
+		print("[VERIFY] PASS event_instance_drained_once fired=", fired_first, "/", fired_again, "/", fired_third, "/", fired_fourth)
+	else:
+		fails.append("event_instance_drained_once")
+		print("[VERIFY] FAIL event_instance_drained_once ", fired_first, " ", fired_again, " ", fired_third, " ", fired_fourth, " left=", event_instances.size())
+	event_instances = []
+	event_seq = 0
+	age = keep_inst_age
+
+	# M2-02：机会冷却——刚发生过的短期不再进候选池
+	opp_last = {}
+	var keep_opp_age := age
+	age = 30
+	events_enabled = true
+	var pool_fresh := _eligible_opportunities()
+	var fresh_has_drought := false
+	for e in pool_fresh:
+		if str((e as Dictionary).get("id", "")) == "drought":
+			fresh_has_drought = true
+	opp_last["drought"] = _month_index()
+	var pool_cold := _eligible_opportunities()
+	var cold_has_drought := false
+	for e in pool_cold:
+		if str((e as Dictionary).get("id", "")) == "drought":
+			cold_has_drought = true
+	opp_last["drought"] = _month_index() - 120
+	var pool_warm := _eligible_opportunities()
+	var warm_has_drought := false
+	for e in pool_warm:
+		if str((e as Dictionary).get("id", "")) == "drought":
+			warm_has_drought = true
+	var opp_ok: bool = fresh_has_drought and not cold_has_drought and warm_has_drought
+	if opp_ok:
+		oks += 1
+		print("[VERIFY] PASS opportunity_cooldown fresh=", pool_fresh.size(), " cold=", pool_cold.size(), " warm=", pool_warm.size())
+	else:
+		fails.append("opportunity_cooldown")
+		print("[VERIFY] FAIL opportunity_cooldown fresh=", fresh_has_drought, " cold=", cold_has_drought, " warm=", warm_has_drought)
+	opp_last = {}
+	age = keep_opp_age
+
+	# M2-03：因果链——父亲死亡的事实能回到造成它的那条事件上
+	facts = []
+	fact_seq = 0
+	last_event_fid = 0
+	last_boundary_fid = 0
+	var keep_chain_age := age
+	age = 30
+	last_boundary_fid = _log_fact("year", "boundary", {"year": year})
+	event_instances = []
+	event_seq = 0
+	var chain_sid := _enqueue_event("plague", "opportunity", _month_index(), last_boundary_fid)
+	_drain_due_events()
+	var ev_fid_chain := last_event_fid
+	var death_fid_chain := _log_fact("death", "old_age", {"who": "father"}, ev_fid_chain)
+	var chain := _fact_chain(death_fid_chain)
+	var boundary_chain := _fact_chain(last_boundary_fid)
+	# 悬空引用检查：每条事实的 cause_fid 要么是 0，要么能在日志里找到
+	var known := {}
+	for f in facts:
+		known[int((f as Dictionary).get("fid", 0))] = true
+	var dangling := 0
+	for f in facts:
+		var cf := int((f as Dictionary).get("cause_fid", 0))
+		if cf != 0 and not known.has(cf):
+			dangling += 1
+	var chain_ok: bool = chain.size() == 3 and int(chain[0]) == death_fid_chain \
+		and int(chain[1]) == ev_fid_chain and int(chain[2]) == last_boundary_fid \
+		and boundary_chain.size() == 1 and dangling == 0 and chain_sid > 0
+	if chain_ok:
+		oks += 1
+		print("[VERIFY] PASS cause_chain_resolves ", chain, " boundary=", boundary_chain)
+	else:
+		fails.append("cause_chain_resolves")
+		print("[VERIFY] FAIL cause_chain_resolves chain=", chain, " boundary=", boundary_chain, " dangling=", dangling)
+	event_instances = []
+	event_seq = 0
+	facts = []
+	fact_seq = 0
+	last_event_fid = 0
+	last_boundary_fid = 0
+	age = keep_chain_age
+
+	# M2-03b：墓志用事实写出具体年份的具体事
+	facts = []
+	fact_seq = 0
+	var keep_story_age := age
+	var keep_birth := birth_year
+	birth_year = 1040
+	var keep_year := year
+	var keep_month := month
+	year = 1053
+	month = 4
+	var ev_fid_story := _log_fact("event", "opportunity", {"id": "drought"})
+	_log_fact("consequence", "event_effect", {"id": "drought", "money": -700, "land": -1}, ev_fid_story)
+	var lines_story := _story_lines()
+	var line_text := str(lines_story[0]) if lines_story.size() == 1 else ""
+	var story_ok: bool = lines_story.size() == 1 and line_text.begins_with("十三岁那年，旱") \
+		and line_text.find("亩田") >= 0
+	# 空日志时不应编造句子
+	facts = []
+	var lines_empty := _story_lines()
+	if story_ok and lines_empty.is_empty():
+		oks += 1
+		print("[VERIFY] PASS epitaph_story_lines ", lines_story)
+	else:
+		fails.append("epitaph_story_lines")
+		print("[VERIFY] FAIL epitaph_story_lines ", lines_story, " empty=", lines_empty.size())
+	year = keep_year
+	month = keep_month
+	age = keep_story_age
+	birth_year = keep_birth
+	facts = []
+	fact_seq = 0
+
+	# M2-04：分阶段自主权——小孩看不见大人的选项
+	var keep_stage_age := age
+	age = 5
+	var s5 := _autonomy_stage()
+	var g5_marry: bool = _action_gated({"min_age": 15})
+	var g5_any: bool = _action_gated({"label": "随便走走"})
+	age = 10
+	var s10 := _autonomy_stage()
+	var g10_minor: bool = _action_gated({"min_stage": "minor"})
+	var g10_adult: bool = _action_gated({"min_stage": "adult"})
+	age = 20
+	var s20 := _autonomy_stage()
+	var g20_adult: bool = _action_gated({"min_stage": "adult"})
+	age = keep_stage_age
+	var stage_ok: bool = s5 == "infant" and s10 == "minor" and s20 == "adult" \
+		and g5_marry and not g5_any and not g10_minor and g10_adult and not g20_adult
+	if stage_ok:
+		oks += 1
+		print("[VERIFY] PASS autonomy_stage_gates ", s5, "->", s10, "->", s20)
+	else:
+		fails.append("autonomy_stage_gates")
+		print("[VERIFY] FAIL autonomy_stage_gates ", s5, " ", s10, " ", s20, " marry=", g5_marry, " adult10=", g10_adult)
+
+	# M2-05：0-18 岁因果切片（放最后：它会重建一个新的人生）
+	var slice := _run_life_slice(2024, 18)
+	var stages: Array = slice["stages"]
+	var saw_minor := false
+	var saw_adult := false
+	for st in stages:
+		if str(st) == "minor":
+			saw_minor = true
+		if str(st) == "adult":
+			saw_adult = true
+	var slice_ok: bool = int(slice["age"]) >= 18 and not bool(slice["ended"]) \
+		and int(slice["settles"]) >= 18 and bool(slice["money_ok"]) and bool(slice["hp_ok"]) \
+		and saw_minor and saw_adult and int(slice["facts"]) > 0 \
+		and int(slice["scenes"]) >= 50 and int(slice["child_facts"]) >= 3
+	if slice_ok:
+		oks += 1
+		print("[VERIFY] PASS life_slice_0_18 age=", slice["age"], " settles=", slice["settles"], " facts=", slice["facts"])
+	else:
+		fails.append("life_slice_0_18")
+		print("[VERIFY] FAIL life_slice_0_18 ", slice)
+
+	# M2-06：事实裁剪后旧引用应被判为「已归档」，而不是「悬空」
+	var keep_floor_facts: Array = (facts as Array).duplicate(true)
+	var keep_floor := fact_floor
+	var keep_seq := fact_seq
+	facts = []
+	fact_floor = 0
+	fact_seq = 0
+	var first_fid := _log_fact("test", "fill")
+	for i in range(FACT_CAP + 5):
+		_log_fact("test", "fill")
+	var dropped_count := fact_seq - facts.size()
+	var oldest_left := int((facts[0] as Dictionary).get("fid", 0))
+	var chain_old := _fact_chain(first_fid)
+	var chain_new := _fact_chain(fact_seq)
+	var trim_ok: bool = facts.size() == FACT_CAP and dropped_count == 6 \
+		and fact_floor == 6 and oldest_left == 7 and chain_old.is_empty() \
+		and chain_new.size() >= 1 and int(chain_new[0]) == fact_seq
+	if trim_ok:
+		oks += 1
+		print("[VERIFY] PASS fact_trim_archive floor=", fact_floor, " kept=", facts.size(), " oldest=", oldest_left)
+	else:
+		fails.append("fact_trim_archive")
+		print("[VERIFY] FAIL fact_trim_archive dropped=", dropped_count, " floor=", fact_floor, " kept=", facts.size(), " oldest=", oldest_left)
+	facts = keep_floor_facts
+	fact_floor = keep_floor
+	fact_seq = keep_seq
+
+	# M2-07：童年事件确实按父母性情与家境筛选，且同一件事在不同人家读起来不同
+	var keep_ct := mother_temper
+	var keep_ft := father_trade
+	var keep_money7 := money
+	var keep_age7b := age
+	age = 5
+	mother_temper = "严"
+	var g_strict: bool = _child_event_ok({"id": "scold", "min_age": 2, "mother": "严"})
+	var g_mild: bool = _child_event_ok({"id": "needle", "min_age": 3, "mother": "和"})
+	mother_temper = "和"
+	money = 100
+	var g_poor: bool = _child_event_ok({"id": "pawn_ring", "min_age": 2, "cond": "poor"})
+	money = 5000
+	var g_rich: bool = _child_event_ok({"id": "pawn_ring", "min_age": 2, "cond": "poor"})
+	father_trade = "匠"
+	money = 100
+	var flavor_craft := _child_flavor()
+	father_trade = "农"
+	money = 5000
+	var flavor_farm := _child_flavor()
+	mother_temper = keep_ct
+	father_trade = keep_ft
+	money = keep_money7
+	age = keep_age7b
+	var child_ok: bool = g_strict and not g_mild and g_poor and not g_rich \
+		and flavor_craft != flavor_farm and flavor_craft.find("刨") >= 0 and flavor_farm.find("泥") >= 0
+	if child_ok:
+		oks += 1
+		print("[VERIFY] PASS child_events_shaped_by_family craft=", flavor_craft.length(), " farm=", flavor_farm.length())
+	else:
+		fails.append("child_events_shaped_by_family")
+		print("[VERIFY] FAIL child_events_shaped_by_family strict=", g_strict, " mild=", g_mild, " poor=", g_poor, " rich=", g_rich, " craft=", flavor_craft, " farm=", flavor_farm)
+
+	# M3-02：效果与文案来自 JSON——连一条只写在数据里的新事件也能生效
+	var keep_money8 := money
+	var keep_hp8 := health
+	var keep_fame8 := fame
+	var keep_story8: Dictionary = (story as Dictionary).duplicate(true)
+	money = 1000
+	health = 80.0
+	fame = 10.0
+	story.erase("落水")
+	_apply_event("temple_fair")
+	var data_money_ok: bool = money == 1030
+	var data_fame_ok: bool = is_equal_approx(fame, 12.0)
+	_apply_event("riverfall")
+	var data_story_ok: bool = story.has("落水")
+	_apply_event("drought")
+	var data_delta_ok: bool = money == 330 or money == 300
+	money = keep_money8
+	health = keep_hp8
+	fame = keep_fame8
+	story = keep_story8
+	if data_money_ok and data_fame_ok and data_story_ok and data_delta_ok:
+		oks += 1
+		print("[VERIFY] PASS event_effects_from_data temple=+30 riverfall_story=", data_story_ok)
+	else:
+		fails.append("event_effects_from_data")
+		print("[VERIFY] FAIL event_effects_from_data money=", data_money_ok, " fame=", data_fame_ok, " story=", data_story_ok, " drought=", data_delta_ok)
+
+	# M2-08：赴任路径必须能真的跑通，县名是字符串而不是字典
+	var keep_office := office_rank
+	var keep_county := county
+	var keep_rank_mil := mil_rank
+	office_rank = 0
+	county = ""
+	_apply_special("take_post")
+	var county_ok: bool = office_rank == 1 and county != "" and county.length() >= 2
+	var county_seen := county
+	office_rank = keep_office
+	county = keep_county
+	mil_rank = keep_rank_mil
+	if county_ok:
+		oks += 1
+		print("[VERIFY] PASS take_post_assigns_county county=", county_seen)
+	else:
+		fails.append("take_post_assigns_county")
+		print("[VERIFY] FAIL take_post_assigns_county office=", office_rank, " county=", county)
+
+	# M2-09：三种视角的旧档迁移——孩子不能被安上父亲的年龄/健康/寿数
+	var pov_fixtures := [
+		["res://tests/fixtures/save_v1_child.json", "child"],
+		["res://tests/fixtures/save_v1_father.json", "father"],
+		["res://tests/fixtures/save_v1_mother.json", "mother"],
+	]
+	var pov_ok := true
+	var pov_detail: Array = []
+	for pair in pov_fixtures:
+		var fx2 := FileAccess.open(str(pair[0]), FileAccess.READ)
+		if fx2 == null:
+			pov_ok = false
+			pov_detail.append("missing:" + str(pair[0]))
+			continue
+		var txt := fx2.get_as_text()
+		fx2.close()
+		var w2 := FileAccess.open(_save_file(), FileAccess.WRITE)
+		w2.store_string(txt)
+		w2.close()
+		save_future = false
+		var loaded2 := _load_game()
+		var v_child := _vitals_of("child")
+		var v_father := _vitals_of("father")
+		var child_age_ok: bool = int(v_child["age"]) == 10
+		var father_age_ok: bool = int(v_father["age"]) == 44
+		if not (loaded2 and pov == str(pair[1]) and child_age_ok and father_age_ok):
+			pov_ok = false
+			pov_detail.append("%s:pov=%s child=%s father=%s" % [str(pair[1]), pov, str(v_child["age"]), str(v_father["age"])])
+	# 三个 fixture 跑完后视角停在最后一个（母亲），要切回孩子，否则后面的死亡路径会走成送父母
+	if pov != "child":
+		_switch_pov("child")
+	ended = false
+	if pov_ok:
+		oks += 1
+		print("[VERIFY] PASS old_save_pov_migration child=10 father=44")
+	else:
+		fails.append("old_save_pov_migration")
+		print("[VERIFY] FAIL old_save_pov_migration ", pov_detail)
+
+	# M2-10：所有死亡入口统一——父母死登记在本人名下，孩子继续；孩子死才结束整局
+	var keep_dead_f := bool(parent_dead.get("father", false))
+	var keep_dead_m := bool(parent_dead.get("mother", false))
+	var keep_death_cause := death_cause
+	parent_dead["father"] = false
+	parent_dead["mother"] = false
+	parents_alive = 2
+	ended = false
+	if pov != "child":
+		_switch_pov("child")
+	# 1) 父亲视角下战死：登记父亲，孩子继续
+	_switch_pov("father")
+	age = 30
+	_die_young()
+	var father_died: bool = bool(parent_dead.get("father", false)) and not ended and pov == "child"
+	var cause_after_war := death_cause
+	# 2) 母亲视角下寿终：同样登记母亲，不结束整局
+	_switch_pov("mother")
+	age = 70
+	lifespan = 70
+	_trigger_actor_end()
+	var mother_died: bool = bool(parent_dead.get("mother", false)) and not ended and pov == "child"
+	# 3) 孩子自己寿终：这一局才结束
+	if pov != "child":
+		_switch_pov("child")
+	age = 70
+	lifespan = 70
+	_trigger_actor_end()
+	var child_ended: bool = ended
+	var death_ok: bool = father_died and mother_died and child_ended and cause_after_war == "战死"
+	if death_ok:
+		oks += 1
+		print("[VERIFY] PASS death_unified cause=", cause_after_war, " child_ended=", child_ended)
+	else:
+		fails.append("death_unified")
+		print("[VERIFY] FAIL death_unified father=", father_died, " mother=", mother_died, " child=", child_ended, " cause=", cause_after_war)
+	ended = false
+	parent_dead["father"] = keep_dead_f
+	parent_dead["mother"] = keep_dead_m
+	death_cause = keep_death_cause
+	parents_alive = 2
+	if pov != "child":
+		_switch_pov("child")
+
+	# M2-11：已安排事件按真实月份到期——+1 月、+2 月、跨年、存档恢复、以及抽选失败时仍然到期
+	var keep_seq_e := event_seq
+	var keep_inst_e: Array = (event_instances as Array).duplicate(true)
+	var keep_events_on := events_enabled
+	var keep_m := month
+	var keep_y := year
+	var keep_seq_money := money
+	var keep_due_age := age
+	var keep_due_life := lifespan
+	var keep_due_hp := health
+	var keep_due_ended := ended
+	age = 20
+	lifespan = 70
+	health = 80.0
+	ended = false
+	events_enabled = false  # 关掉新抽选，只验证已排的事件
+	event_instances = []
+	month = 3
+	event_seq = 0
+	_enqueue_event("find_coin", "test", _month_index() + 1)
+	_advance_months(1)
+	var fired_after_one := 1 if event_instances.is_empty() else 0
+	_enqueue_event("find_coin", "test", _month_index() + 2)
+	_advance_months(1)
+	var still_pending := event_instances.size()
+	_advance_months(1)
+	var fired_after_two := 1 if event_instances.is_empty() else 0
+	# 跨年：12 月排到次年 1 月
+	month = 12
+	_enqueue_event("find_coin", "test", _month_index() + 2)
+	_advance_months(2)
+	var fired_cross_year := 1 if event_instances.is_empty() else 0
+	# 存档恢复后仍然到期
+	month = 3
+	_enqueue_event("find_coin", "test", _month_index() + 3)
+	_save_game()
+	event_instances = []
+	_load_game()
+	var restored := event_instances.size()
+	events_enabled = true
+	_advance_months(3)
+	var fired_after_load := 1 if event_instances.is_empty() else 0
+	events_enabled = keep_events_on
+	month = keep_m
+	year = keep_y
+	event_seq = keep_seq_e
+	event_instances = keep_inst_e
+	money = keep_seq_money
+	age = keep_due_age
+	lifespan = keep_due_life
+	health = keep_due_hp
+	ended = keep_due_ended
+	var due_ok: bool = fired_after_one == 1 and still_pending == 1 and fired_after_two == 1 \
+		and fired_cross_year == 1 and restored == 1 and fired_after_load == 1
+	if due_ok:
+		oks += 1
+		print("[VERIFY] PASS event_due_by_month one=", fired_after_one, " pending=", still_pending, " two=", fired_after_two, " cross=", fired_cross_year, " load=", fired_after_load)
+	else:
+		fails.append("event_due_by_month")
+		print("[VERIFY] FAIL event_due_by_month one=", fired_after_one, " pending=", still_pending, " two=", fired_after_two, " cross=", fired_cross_year, " restored=", restored, " load=", fired_after_load)
+
+	# M2-12：同一户人家，三个视角看到的年关费用必须一致
+	var keep_hh_age := age
+	var keep_hh_pov := pov
+	if pov != "child":
+		_switch_pov("child")
+	var hh_child := _household_year_cost()
+	_switch_pov("father")
+	var hh_father := _household_year_cost()
+	_switch_pov("mother")
+	var hh_mother := _household_year_cost()
+	_switch_pov("child")
+	age = keep_hh_age
+	if hh_child == hh_father and hh_father == hh_mother and hh_child > 0:
+		oks += 1
+		print("[VERIFY] PASS household_cost_pov_consistent cost=", hh_child)
+	else:
+		fails.append("household_cost_pov_consistent")
+		print("[VERIFY] FAIL household_cost_pov_consistent ", hh_child, " ", hh_father, " ", hh_mother)
+
+	# M2-01b：事件绑定承受者——用例自带起点，不依赖前序用例的状态
+	var keep_ev_pov := pov
+	var keep_ev_inst: Array = (event_instances as Array).duplicate(true)
+	var keep_ev_seq := event_seq
+	var keep_ev_events := events_enabled
+	var keep_ev_age := age
+	var keep_ev_hp := health
+	var keep_ev_money := money
+	var keep_ev_dead: Dictionary = (parent_dead as Dictionary).duplicate(true)
+	var keep_ev_facts: Array = (facts as Array).duplicate(true)
+	events_enabled = false
+	# 干净起点：父母都活着、视角回到孩子、队列与事实清空
+	ended = false
+	parent_dead["father"] = false
+	parent_dead["mother"] = false
+	parents_alive = 2
+	if pov != "child":
+		_switch_pov("child")
+	event_instances = []
+	event_seq = 0
+	facts = []
+	fact_seq = 0
+	age = 20
+	health = 80.0
+	lifespan = 60
+	actor_vitals["child"] = {"age": 20, "health": 80.0, "lifespan": 60}
+	actor_vitals["father"] = {"age": 34, "health": 70.0, "lifespan": 80}
+	actor_vitals["mother"] = {"age": 32, "health": 70.0, "lifespan": 80}
+	var child_hp_before := 80.0
+	_enqueue_event("drought", "test", _month_index(), 0, "child", "cancel")
+	var queued_for_child: bool = event_instances.size() == 1 \
+		and str((event_instances[0] as Dictionary).get("target", "")) == "child"
+	_switch_pov("father")
+	var switched_ok: bool = pov == "father" and age == 34
+	var father_hp_before := health
+	var fired_once := _drain_due_events()
+	_switch_pov("child")
+	var child_hit: bool = fired_once == 1 and health < child_hp_before
+	var father_untouched: bool = is_equal_approx(father_hp_before, float(_vitals_of("father")["health"]))
+	parent_dead["father"] = true
+	var money_before_cancel := money
+	_enqueue_event("drought", "test", _month_index(), 0, "father", "cancel")
+	_drain_due_events()
+	var cancelled_ok: bool = money == money_before_cancel and event_instances.is_empty()
+	parent_dead["father"] = false
+	# 3) 存读档后主体、到期、策略不变
+	event_instances = []
+	var sid_keep := _enqueue_event("plague", "test", _month_index() + 2, 0, "mother", "transfer")
+	_save_game()
+	event_instances = []
+	_load_game()
+	var restored_target := ""
+	var restored_policy := ""
+	var restored_due := -1
+	for inst2 in event_instances:
+		if int((inst2 as Dictionary).get("sid", 0)) == sid_keep:
+			restored_target = str(inst2.get("target", ""))
+			restored_policy = str(inst2.get("policy", ""))
+			restored_due = int(inst2.get("due", -1))
+	var restore_ok: bool = restored_target == "mother" and restored_policy == "transfer" and restored_due == _month_index() + 2
+	# 4) 同一事件只结算一次
+	event_instances = []
+	_enqueue_event("find_coin", "test", _month_index(), 0, "child", "cancel")
+	var first_fire := _drain_due_events()
+	var second_fire := _drain_due_events()
+	var once_ok: bool = first_fire == 1 and second_fire == 0
+	events_enabled = keep_ev_events
+	event_instances = keep_ev_inst
+	event_seq = keep_ev_seq
+	money = keep_ev_money
+	age = keep_ev_age
+	health = keep_ev_hp
+	if pov != keep_ev_pov:
+		_switch_pov(keep_ev_pov)
+	var ev_bind_ok: bool = switched_ok and queued_for_child and child_hit and father_untouched and cancelled_ok and restore_ok and once_ok
+	if ev_bind_ok:
+		oks += 1
+		print("[VERIFY] PASS event_actor_binding switched=", switched_ok, " queued=", queued_for_child, " child=", child_hit, " father=", father_untouched, " cancel=", cancelled_ok, " restore=", restore_ok, " once=", once_ok)
+	else:
+		fails.append("event_actor_binding")
+		print("[VERIFY] FAIL event_actor_binding switched=", switched_ok, " queued=", queued_for_child, " child=", child_hit, " father=", father_untouched, " cancel=", cancelled_ok, " restore=", restore_ok, " once=", once_ok)
+
+	# M2-01c：取消不算发生过；非当前人物扣血也要走死亡结算；旧档缺主体显式取消
+	var keep_c_inst: Array = (event_instances as Array).duplicate(true)
+	var keep_c_seq := event_seq
+	var keep_c_facts: Array = (facts as Array).duplicate(true)
+	var keep_c_pov := pov
+	var keep_c_events := events_enabled
+	events_enabled = false
+	if pov != "child":
+		_switch_pov("child")
+	facts = []
+	fact_seq = 0
+	event_instances = []
+	event_seq = 0
+	# 1) 父亲已死，取消他的疫病：既不算变故，也不产生墓志句子
+	parent_dead["father"] = true
+	_enqueue_event("plague", "test", _month_index(), 0, "father", "cancel")
+	_drain_due_events()
+	var cancelled_events := _count_facts("event")
+	var cancelled_marks := _count_facts("event_cancelled_dead_target")
+	var story_for_cancel := _story_lines().size()
+	var cancel_ok: bool = cancelled_events == 0 and cancelled_marks == 1 and story_for_cancel == 0
+	parent_dead["father"] = false
+	# 2) 孩子（非当前视角）被扣到 0 健康：必须判死，转移也不能落到他身上
+	event_instances = []
+	_switch_pov("father")
+	actor_vitals["child"] = {"age": 10, "health": 1.0, "lifespan": 60}
+	_enqueue_event("drought", "test", _month_index(), 0, "child", "cancel")
+	_drain_due_events()
+	var child_dead: bool = _actor_is_dead("child")
+	# 孩子已死：把事件排给已故父亲并要求转移——必须被拒绝，且资源不变
+	parent_dead["father"] = true
+	var money_before_refuse2 := money
+	var child_hp_refuse := float(_vitals_of("child")["health"])
+	_enqueue_event("plague", "test", _month_index(), 0, "father", "transfer")
+	_drain_due_events()
+	var transfer_refused := _count_facts("event_transferred") == 0 \
+		and money == money_before_refuse2 \
+		and is_equal_approx(float(_vitals_of("child")["health"]), child_hp_refuse)
+	var transfer_ok: bool = child_dead and transfer_refused
+	parent_dead["father"] = false
+	ended = false
+	if pov != "child":
+		_switch_pov("child")
+	# 3) 旧档事件缺 target：按未知主体取消
+	event_instances = []
+	event_seq = 0
+	fact_seq = facts.size()
+	var events_before_legacy := _count_facts("event")
+	event_instances.append({"sid": 1, "id": "drought", "cause": "test", "due": _month_index(), "fired": false,
+		"cause_fid": 0, "policy": "cancel"})
+	_drain_due_events()
+	var unknown_marks := _count_facts("event_cancelled_unknown_target")
+	var unknown_ok: bool = unknown_marks == 1 and _count_facts("event") == events_before_legacy
+	event_instances = keep_c_inst
+	event_seq = keep_c_seq
+	facts = keep_c_facts
+	fact_seq = keep_c_facts.size()
+	events_enabled = keep_c_events
+	if pov != keep_c_pov:
+		_switch_pov(keep_c_pov)
+	var bound_ok: bool = cancel_ok and transfer_ok and unknown_ok
+	if bound_ok:
+		oks += 1
+		print("[VERIFY] PASS event_boundaries cancel=", cancel_ok, " transfer=", transfer_ok, " legacy=", unknown_ok)
+	else:
+		fails.append("event_boundaries")
+		print("[VERIFY] FAIL event_boundaries cancel=", cancel_ok, " transfer=", transfer_ok, " legacy=", unknown_ok, " dead=", child_dead)
+
+	# M2-01d：死亡结算收尾——事件致死、跨年到寿、父母只结算一次、转移一次且可拒绝
+	var keep_d_seed := sim_seed
+	var keep_d_inst: Array = (event_instances as Array).duplicate(true)
+	var keep_d_seq := event_seq
+	var keep_d_facts: Array = (facts as Array).duplicate(true)
+	var keep_d_pov := pov
+	var keep_d_dead: Dictionary = (parent_dead as Dictionary).duplicate(true)
+	var keep_d_yy: Dictionary = (parent_death_year as Dictionary).duplicate(true)
+	var keep_d_alive := parents_alive
+	var keep_d_ended := ended
+	var keep_d_money := money
+	var keep_d_age := age
+	var keep_d_life := lifespan
+	var keep_d_hp := health
+	var keep_d_vitals: Dictionary = (actor_vitals as Dictionary).duplicate(true)
+	var keep_d_events := events_enabled
+	events_enabled = false
+	ended = false
+	parent_dead["father"] = false
+	parent_dead["mother"] = false
+	parents_alive = 2
+	# 1) 操控父亲，孩子（非当前视角）被事件扣到 0 健康：必须进入孩子结局
+	if pov != "child":
+		_switch_pov("child")
+	_switch_pov("father")
+	age = 30
+	actor_vitals["child"] = {"age": 10, "health": 1.0, "lifespan": 60}
+	event_instances = []
+	event_seq = 0
+	_enqueue_event("drought", "test", _month_index(), 0, "child", "cancel")
+	_drain_due_events()
+	var child_killed: bool = ended
+	# 2) 非当前孩子跨年到寿：走正常 _advance_months 路径结束人生
+	ended = false
+	if pov != "father":
+		_switch_pov("father")
+	age = 30
+	health = 80.0
+	lifespan = 70
+	actor_vitals["child"] = {"age": 59, "health": 80.0, "lifespan": 60}
+	last_settled_year = year
+	_advance_months(12)
+	var child_aged_out: bool = ended
+	# 3) 父母在年边界同一年去世：各结算一次、人数只减两
+	ended = false
+	parent_dead["father"] = false
+	parent_dead["mother"] = false
+	parents_alive = 2
+	if pov != "child":
+		_switch_pov("child")
+	age = 30
+	health = 80.0
+	lifespan = 90
+	actor_vitals["father"] = {"age": 70, "health": 80.0, "lifespan": 70}
+	actor_vitals["mother"] = {"age": 70, "health": 80.0, "lifespan": 70}
+	parents_alive = 2
+	last_settled_year = year
+	_advance_months(12)
+	var kin_once: bool = bool(parent_dead["father"]) and bool(parent_dead["mother"]) and parents_alive == 0
+	# 4) 已故父亲的事件转给活着的孩子，事实里保留原主体与实际承受者
+	ended = false
+	parent_dead["father"] = true
+	actor_vitals["child"] = {"age": 10, "health": 80.0, "lifespan": 60}
+	if pov != "child":
+		_switch_pov("child")
+	facts = []
+	fact_seq = 0
+	event_instances = []
+	event_seq = 0
+	var hp_before_transfer := float(_vitals_of("child")["health"])
+	_enqueue_event("drought", "test", _month_index(), 0, "father", "transfer")
+	_drain_due_events()
+	var hp_after_transfer := float(_vitals_of("child")["health"])
+	var transfer_fact: Dictionary = {}
+	for f in facts:
+		var fd: Dictionary = f
+		if str(fd.get("kind", "")) == "event":
+			transfer_fact = fd
+	var tf_data: Dictionary = transfer_fact.get("data", {})
+	var transfer_applied: bool = hp_after_transfer < hp_before_transfer \
+		and str(tf_data.get("from", "")) == "father" \
+		and str(tf_data.get("to", "")) == "child" \
+		and str(tf_data.get("result", "")) == "transferred"
+	# 5) 孩子已死时拒绝转移：个人与家庭资源都不变
+	var money_before_refuse := money
+	health = 0.0
+	_switch_pov("child")
+	_settle_actor_death("child", "test")
+	ended = true
+	if pov != "father":
+		_switch_pov("father")
+	actor_vitals["child"] = {"age": 10, "health": 0.0, "lifespan": 60}
+	var hp_before_refuse := float(_vitals_of("child")["health"])
+	event_instances = []
+	event_seq = 0
+	_enqueue_event("drought", "test", _month_index(), 0, "father", "transfer")
+	_drain_due_events()
+	var refuse_ok: bool = money == money_before_refuse \
+		and is_equal_approx(float(_vitals_of("child")["health"]), hp_before_refuse)
+	ended = keep_d_ended
+	parent_dead = keep_d_dead
+	parent_death_year = keep_d_yy
+	parents_alive = keep_d_alive
+	money = keep_d_money
+	age = keep_d_age
+	lifespan = keep_d_life
+	health = keep_d_hp
+	actor_vitals = keep_d_vitals
+	event_instances = keep_d_inst
+	event_seq = keep_d_seq
+	facts = keep_d_facts
+	fact_seq = keep_d_facts.size()
+	events_enabled = keep_d_events
+	sim_seed = keep_d_seed
+	if pov != keep_d_pov:
+		_switch_pov(keep_d_pov)
+	var death_settle_ok: bool = child_killed and child_aged_out and kin_once and transfer_applied and refuse_ok
+	if death_settle_ok:
+		oks += 1
+		print("[VERIFY] PASS death_settlement killed=", child_killed, " aged=", child_aged_out, " kin=", kin_once, " transfer=", transfer_ok, " refuse=", refuse_ok)
+	else:
+		fails.append("death_settlement")
+		print("[VERIFY] FAIL death_settlement killed=", child_killed, " aged=", child_aged_out, " kin=", kin_once, " transfer=", transfer_ok, " refuse=", refuse_ok)
+
+	# M2-01e：事件致死必须在本次月推进内结束；结束后不再执行同月后续事件
+	var keep_e_inst: Array = (event_instances as Array).duplicate(true)
+	var keep_e_seq := event_seq
+	var keep_e_facts: Array = (facts as Array).duplicate(true)
+	var keep_e_pov := pov
+	var keep_e_ended := ended
+	var keep_e_money := money
+	var keep_e_vitals: Dictionary = (actor_vitals as Dictionary).duplicate(true)
+	var keep_e_events := events_enabled
+	var keep_e_dead: Dictionary = (parent_dead as Dictionary).duplicate(true)
+	events_enabled = false
+	ended = false
+	if pov != "child":
+		_switch_pov("child")
+	# 1) 次月到期的致命事件：推进这一个月就要 ended
+	age = 10
+	health = 1.0
+	lifespan = 60
+	actor_vitals["child"] = {"age": 10, "health": 1.0, "lifespan": 60}
+	event_instances = []
+	event_seq = 0
+	_enqueue_event("drought", "test", _month_index() + 1, 0, "child", "cancel")
+	_advance_months(1)
+	var killed_in_month: bool = ended
+	# 2) 同一月里：孩子被旱灾致死（-700）后，母亲的 +1200 不得执行
+	ended = false
+	parent_dead["father"] = false
+	parent_dead["mother"] = false
+	parents_alive = 2
+	money = 1000
+	if pov != "father":
+		_switch_pov("father")
+	age = 30
+	health = 80.0
+	lifespan = 70
+	actor_vitals["child"] = {"age": 10, "health": 1.0, "lifespan": 60}
+	actor_vitals["mother"] = {"age": 28, "health": 80.0, "lifespan": 70}
+	facts = []
+	fact_seq = 0
+	event_instances = []
+	event_seq = 0
+	_enqueue_event("drought", "test", _month_index(), 0, "child", "cancel")
+	_enqueue_event("reward", "test", _month_index(), 0, "mother", "cancel")
+	_advance_months(1)
+	var stopped_after_death: bool = ended and money == 300
+	var money_at_stop := money
+	var reward_not_recorded := _count_facts("event") == 1
+	var kill_ok: bool = killed_in_month and stopped_after_death and reward_not_recorded
+	ended = keep_e_ended
+	money = keep_e_money
+	age = 10
+	health = 80.0
+	actor_vitals = keep_e_vitals
+	parent_dead = keep_e_dead
+	parents_alive = 2
+	event_instances = keep_e_inst
+	event_seq = keep_e_seq
+	facts = keep_e_facts
+	fact_seq = keep_e_facts.size()
+	events_enabled = keep_e_events
+	if pov != keep_e_pov:
+		_switch_pov(keep_e_pov)
+	if kill_ok:
+		oks += 1
+		print("[VERIFY] PASS event_kill_stops_month in_month=", killed_in_month, " money=", money_at_stop)
+	else:
+		fails.append("event_kill_stops_month")
+		print("[VERIFY] FAIL event_kill_stops_month in_month=", killed_in_month, " stopped=", stopped_after_death, " one_event=", reward_not_recorded)
+
+	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
+	var keep_money := money
+	var keep_age := age
+	money = 1000
+	age = 40
+	lifespan = 40
+	_on_action({"label": "长活", "months": 12, "gain": {"money": 5000}})
+	if ended and money == 1000:
+		oks += 1
+		print("[VERIFY] PASS death_blocks_reward money=", money)
+	else:
+		fails.append("death_blocks_reward")
+		print("[VERIFY] FAIL death_blocks_reward ended=", ended, " money=", money)
+	money = keep_money
+	age = keep_age
+
+	print("[VERIFY] SUMMARY pass=", oks, " fail=", fails.size(), " failed=", fails)
+	get_tree().quit(0 if fails.is_empty() else 1)
 
 
 func debug_scenes() -> void:
@@ -788,7 +2882,7 @@ func debug_events() -> void:
 			if _event_ok(e):
 				pool.append(e)
 		if not pool.is_empty():
-			seen[str(pool[randi() % pool.size()]["id"])] = true
+			seen[str(_pick_from(pool)["id"])] = true
 	print("[EVT] 可达事件种类=", seen.size(), " ", seen.keys())
 	_set_att("zhang_tu", 0)
 	print("[MEM] 张屠户 态度 0 → 肉价 ", _meat_price())
@@ -953,15 +3047,21 @@ func debug_exam() -> void:
 
 
 func _clear_save() -> void:
-	if FileAccess.file_exists(_save_file()):
-		var dir := DirAccess.open("user://")
-		if dir != null:
-			dir.remove(_save_file().get_file())
+	var dir := DirAccess.open("user://")
+	if dir == null:
+		return
+	var base := _save_file().get_file()
+	for f in [base, base + ".bak", base + ".tmp"]:
+		if FileAccess.file_exists("user://" + f):
+			dir.remove(f)
 
 
 func _init_identity() -> void:
 	var r := RandomNumberGenerator.new()
-	r.randomize()
+	if sim_seed != 0:
+		r.seed = sim_seed + 2
+	else:
+		r.randomize()
 	var o: Dictionary = DB.pick_origin(r)
 	var nm: Dictionary = DB.make_name(r, "男")
 	name_text = str(nm["full"])
@@ -986,20 +3086,21 @@ func _init_identity() -> void:
 	father_name = str(nm["surname"]) + str(fathers[r.randi_range(0, fathers.size() - 1)])
 	mother_name = str(mothers[r.randi_range(0, mothers.size() - 1)]) + "氏"
 	# 父亲的行当、母亲的性情——决定童年被怎么带大
-	if origin_flags.has("匠人"):
-		father_trade = "匠"
-	elif origin_flags.has("商人"):
-		father_trade = "商"
-	elif origin_flags.has("军户"):
-		father_trade = "兵"
-	elif origin_flags.has("读书") or origin_flags.has("士人"):
-		father_trade = "吏"
-	else:
-		father_trade = "农"
+	father_trade = _father_trade_for(origin_flags)
 	var temps := ["和", "严", "病"]
 	mother_temper = str(temps[r.randi_range(0, temps.size() - 1)])
 	pov_state["father"] = _make_parent("father", r)
 	pov_state["mother"] = _make_parent("mother", r)
+	# M1-01b：生命值建立 actor 表，pov_state 只留职业与 story
+	actor_vitals = {}
+	for k in pov_state.keys():
+		var ps: Dictionary = pov_state[k]
+		actor_vitals[str(k)] = {
+			"age": int(ps.get("age", 0)),
+			"health": float(ps.get("health", 100.0)),
+			"lifespan": int(ps.get("lifespan", 100)),
+		}
+	actor_vitals["child"] = {"age": age, "health": health, "lifespan": lifespan}
 	child_pos = player
 	# 体格：兵的壮、吏的瘦、农与匠的厚实
 	if origin_flags.has("军户"):
@@ -1111,6 +3212,8 @@ func _father_trade_word() -> String:
 
 
 func _capture_pov() -> Dictionary:
+	# M1-01b：生命值写进 actor_vitals，pov_state 只带职业与 story
+	_store_active_vitals()
 	var d := {}
 	for k in POV_FIELDS:
 		d[k] = get(k)
@@ -1123,6 +3226,13 @@ func _apply_pov(d: Dictionary) -> void:
 		if d.has(k):
 			set(k, d[k])
 	story = (d.get("story", {}) as Dictionary).duplicate(true)
+	# 生命值从 actor_vitals 取；注意此时 pov 已切换，不能用 _vitals_of（它会读全局字段）
+	var v: Dictionary = actor_vitals.get(pov, {})
+	if v.is_empty():
+		return
+	age = int(v.get("age", age))
+	health = float(v.get("health", health))
+	lifespan = int(v.get("lifespan", lifespan))
 
 
 func _pov_npc_id() -> String:
@@ -1132,7 +3242,7 @@ func _pov_npc_id() -> String:
 func _switch_pov(who: String) -> void:
 	if who == pov or ended:
 		return
-	if who != "child" and not pov_state.has(who):
+	if who != "child" and (not pov_state.has(who) or bool(parent_dead.get(who, false))):
 		return
 	var from_pos := player
 	pov_state[pov] = _capture_pov()
@@ -1142,6 +3252,9 @@ func _switch_pov(who: String) -> void:
 	pov = who
 	if not target.is_empty():
 		_apply_pov(target)
+	else:
+		# 没有存过这个人的职业快照（例如一直没切走过），但生命值仍要从 actor_vitals 恢复
+		_apply_pov({})
 	if who == "child":
 		player = child_pos
 	else:
@@ -1193,7 +3306,7 @@ func _refresh_pov_bar() -> void:
 	for i in range(pov_btns.size()):
 		var who := str(ids[i])
 		var b: Button = pov_btns[i]
-		var alive := who == "child" or pov_state.has(who)
+		var alive := who == "child" or not bool(parent_dead.get(who, false))
 		b.visible = alive
 		if not alive:
 			continue
@@ -1342,6 +3455,7 @@ func _pick_scene_option(sid: String, oid: String) -> void:
 		money -= cost
 		_apply_gain(opt.get("gain", {}))
 		scenes_done["%d_%s" % [year, sid]] = true
+		_log_fact("scene", "festival", {"id": sid, "year": year})
 		var line := str(opt["text"])
 		# 童年 + 家里紧 → 换一句更苦的，并留下墓志印记
 		if age < 12 and money < 250 and opt.has("poor"):
@@ -1882,6 +3996,19 @@ func _finish_walk() -> void:
 		_open_panel(id)
 
 
+func _father_trade_for(flags: Array) -> String:
+	# 出身 flag → 父亲行当。数据里用的是「商贾」，历史代码曾写「商人」，两者都接受。
+	if flags.has("匠人"):
+		return "匠"
+	if flags.has("商贾") or flags.has("商人"):
+		return "商"
+	if flags.has("军户"):
+		return "兵"
+	if flags.has("读书") or flags.has("士人"):
+		return "吏"
+	return "农"
+
+
 func _spawn_npcs() -> void:
 	npcs = []
 	var r := RandomNumberGenerator.new()
@@ -1913,7 +4040,6 @@ func _spawn_npcs() -> void:
 			"warm": "他切下一小块肉推过来：拿去，不算钱。",
 			"cold": "他把刀往案板上一拍：今天不赊账。"},
 		{"id": "lao_seng", "name": "老僧", "kind": 3, "home": Vector2(1644, 912), "line": "他扫地，扫得很慢，一下一下。"},
-		{"id": "lao_seng", "name": "老僧", "kind": 3, "home": Vector2(1644, 912), "line": "他扫地，扫得很慢，一下一下。"},
 		{"id": "huo_lang", "name": "货郎", "kind": 1, "home": Vector2(1004, 852), "line": "担子两头挂着针线、糖人、小鼓。"},
 		{"id": "li_zheng", "name": "里正", "kind": 4, "home": Vector2(1258, 862), "line": "他背着手站在井边，看谁家烟囱没冒烟。"},
 		{"id": "wen_po", "name": "稳婆", "kind": 0, "home": Vector2(472, 754), "line": "她坐在门槛上搓麻绳，手很稳。"},
@@ -1935,7 +4061,7 @@ func _spawn_npcs() -> void:
 		var cc: Dictionary = c
 		if str(cc["id"]) == pov:
 			continue
-		if str(cc["id"]) in ["father", "mother"] and not pov_state.has(str(cc["id"])):
+		if str(cc["id"]) in ["father", "mother"] and bool(parent_dead.get(str(cc["id"]), false)):
 			continue
 		var home: Vector2 = cc["home"]
 		var entry := {
@@ -1944,7 +4070,7 @@ func _spawn_npcs() -> void:
 			"pos": home, "target": home,
 			"dir": 1.0, "speed": r.randf_range(14.0, 22.0),
 			"kind": int(cc["kind"]), "phase": r.randf() * 6.28,
-			"wait": r.randf_range(0.0, 2.0), "att": 0,
+			"wait": r.randf_range(0.0, 2.0), "att": _get_att(str(cc["id"])),
 			"build": BUILDS[absi(int(hash(str(cc["id"])))) % 4],
 		}
 		if cc.has("warm"):
@@ -1955,7 +4081,7 @@ func _spawn_npcs() -> void:
 			entry["line_child"] = str(cc["line_child"])
 		npcs.append(entry)
 	if pov != "child":
-		var kid_age := int((pov_state.get("child", {}) as Dictionary).get("age", 0))
+		var kid_age := int(_vitals_of("child")["age"])
 		var kp := child_pos
 		npcs.append({
 			"id": "child", "name": name_text, "named": true,
@@ -1983,7 +4109,7 @@ func _spawn_special(id: String, npc_name: String, pos: Vector2, line: String) ->
 	npcs.append({
 		"id": id, "name": npc_name, "named": true, "line": line,
 		"home": pos, "pos": pos, "target": pos, "dir": 1.0,
-		"speed": 0.0, "kind": 0, "phase": 0.0, "wait": 0.0, "att": 0,
+		"speed": 0.0, "kind": 0, "phase": 0.0, "wait": 0.0, "att": _get_att(id),
 	})
 
 
@@ -2087,12 +4213,43 @@ func _close_panel() -> void:
 	queue_redraw()
 
 
+const STAGE_RANK := {"infant": 0, "minor": 1, "adult": 2}
+
+
+func _autonomy_stage() -> String:
+	# M2-04：分阶段自主权。0-6 由父母带着过，7-14 只能做有限的事，15 起自己拿主意
+	if age < 7:
+		return "infant"
+	if age < 15:
+		return "minor"
+	return "adult"
+
+
+func _stage_label() -> String:
+	match _autonomy_stage():
+		"infant":
+			return "（蒙养之年，由父母带着过）"
+		"minor":
+			return "（渐知人事，能做的事还少）"
+	return ""
+
+
+func _action_gated(act: Dictionary) -> bool:
+	# 行动级门槛：显式 min_age，或要求达到某个自主阶段
+	if age < int(act.get("min_age", 0)):
+		return true
+	var need := str(act.get("min_stage", ""))
+	if need == "":
+		return false
+	return int(STAGE_RANK.get(_autonomy_stage(), 2)) < int(STAGE_RANK.get(need, 2))
+
+
 func _open_panel(id: String) -> void:
 	var b := _by_id(id)
 	if b.is_empty():
 		return
 	panel_title.text = str(b["name"])
-	panel_sub.text = _panel_subtitle(id)
+	panel_sub.text = _panel_subtitle(id) + _stage_label()
 	for c in panel_actions.get_children():
 		panel_actions.remove_child(c)
 		c.queue_free()
@@ -2111,6 +4268,8 @@ func _open_panel(id: String) -> void:
 
 	for a in _actions_for(id):
 		var act: Dictionary = a
+		if _action_gated(act):
+			continue
 		var btn := UIKit.choice(_strip_time(str(act["label"])))
 		if int(act.get("cost", 0)) > money:
 			btn.disabled = true
@@ -2214,6 +4373,9 @@ func _on_dialog_choice(ch: Dictionary, id: String) -> void:
 	if cost > money:
 		_toast("钱不够。", Color(0.62, 0.24, 0.18))
 		return
+	# M1-02：对话与地点行动共用同一套冷却结算，且都不再推进月份
+	if not _cooldown_ready(_action_key(ch)):
+		return
 	money -= cost
 	if ch.has("once"):
 		story[str(ch["once"])] = true
@@ -2222,15 +4384,14 @@ func _on_dialog_choice(ch: Dictionary, id: String) -> void:
 	if ch.has("gain"):
 		_apply_gain(ch["gain"])
 	if ch.has("att"):
-		for i in range(npcs.size()):
-			if str(npcs[i].get("id", "")) == id:
-				npcs[i]["att"] = int(npcs[i].get("att", 0)) + int(ch["att"])
+		_set_att(id, _get_att(id) + int(ch["att"]))
 	if ch.has("special"):
 		_apply_special(str(ch["special"]))
 	panel.visible = false
 	busy = false
 	_unfreeze_npc(id)
-	_advance_months(int(ch.get("months", 1)))
+	_cooldown_commit(_action_key(ch), int(ch.get("months", 1)))
+	# M1-02：对话不再额外推进月份，时间由世界钟与节令推进
 	if ch.has("result"):
 		_toast(str(ch["result"]), Color(0.30, 0.26, 0.21))
 	Sfx.play("ok")
@@ -2245,12 +4406,22 @@ func _on_dialog_choice(ch: Dictionary, id: String) -> void:
 
 func _parent_death() -> void:
 	var who := pov
+	# 孩子本人不走"送父母"这条路径
+	if who == "child":
+		return
+	# A03/A06：死亡结算只能发生一次，重复调用不得再扣 parents_alive 或再发一次讣告
+	if bool(parent_dead.get(who, false)):
+		print("[DEATH] already_settled ", who)
+		return
 	var nm := father_name if who == "father" else mother_name
 	var p_age := age
-	var kid_age := int((pov_state.get("child", {}) as Dictionary).get("age", 0))
+	var kid_age := int(_vitals_of("child")["age"])
 	parents_alive = maxi(0, parents_alive - 1)
+	# A03：用 alive/death_record 表示死亡，不再靠删除人物实体
+	parent_dead[who] = true
+	parent_death_year[who] = year
+	_log_fact("death", "old_age", {"who": who, "age": p_age}, last_event_fid)
 	_switch_pov("child")
-	pov_state.erase(who)
 	_spawn_npcs()
 	_refresh_pov_bar()
 	var lines: Array = [
@@ -2285,14 +4456,15 @@ func _dialog_line(n: Dictionary) -> String:
 
 
 func _set_att(id: String, v: int) -> void:
+	# M1-01a：关系存在 WorldState（relations），场景里的 NPC 只是显示
+	relations[id] = v
 	for i in range(npcs.size()):
 		if str(npcs[i].get("id", "")) == id:
 			npcs[i]["att"] = v
 
 
 func _get_att(id: String) -> int:
-	var n := _find_npc(id)
-	return int(n.get("att", 0)) if not n.is_empty() else 0
+	return int(relations.get(id, 0))
 
 
 func _meat_price() -> int:
@@ -2608,10 +4780,10 @@ func _actions_for(id: String) -> Array:
 			var can_sheng := exam_year and story.has("举人") and not story.has("进士") and learning >= 42.0 and age >= 18 and age <= 45
 			if can_jie:
 				acts.append({"label": "应解试（今年开科，八百文）", "months": 3, "cost": 800,
-					"special": "jieshi"})
+					"special": "jieshi", "min_age": 12})
 			elif can_sheng:
 				acts.append({"label": "应省试（进京，一年，三千文）", "months": 12, "cost": 3000,
-					"special": "shengshi"})
+					"special": "shengshi", "min_age": 16})
 			acts.append({"label": "在书院读经（一年，两千文）", "months": 12, "cost": 2000,
 				"gain": {"learning": 13, "fame": 2}, "flag": "读书",
 				"flavor": "山长讲《春秋》，一堂课下来，你手心出汗。"})
@@ -2637,7 +4809,7 @@ func _actions_for(id: String) -> Array:
 		"yamen":
 			var yacts: Array = []
 			if story.has("进士") and office_rank == 0:
-				yacts.append({"label": "赴任（半年）", "months": 6, "special": "take_post"})
+				yacts.append({"label": "赴任（半年）", "months": 6, "special": "take_post", "min_age": 18})
 			if office_rank >= 1:
 				yacts.append({"label": "秉公断案（半年）", "months": 6, "special": "judge_fair"})
 				yacts.append({"label": "收一笔贿（半年）", "months": 6, "special": "judge_bribe"})
@@ -2728,7 +4900,7 @@ func _actions_for(id: String) -> Array:
 			if mil_rank == 1:
 				dacts.append({"label": "操练（半年）", "months": 6, "gain": {"money": 500, "health": 2},
 					"flavor": "半年下来，能拉开一石弓了。"})
-				dacts.append({"label": "随军出征（一年，会死人）", "months": 12, "special": "expedition"})
+				dacts.append({"label": "随军出征（一年，会死人）", "months": 12, "special": "expedition", "min_age": 16})
 			if mil_rank == 1 and merit >= 2 and health >= 55.0:
 				dacts.append({"label": "升作厢军（三个月）", "months": 3, "special": "promote_nco"})
 			if mil_rank == 2:
@@ -2967,6 +5139,46 @@ func _run_shop(months: int) -> void:
 			Color(0.30, 0.42, 0.22) if profit >= 0 else Color(0.62, 0.24, 0.18))
 
 
+func _month_index() -> int:
+	return year * 12 + month
+
+
+func _action_key(act: Dictionary) -> String:
+	# 冷却键优先用行动自带的稳定 id；没有 id 时退回内容签名（标签 + 月数 + 效果），
+	# 保证改文案不会换掉冷却、也不会让两个不同行动共用一个冷却。
+	var aid := str(act.get("id", ""))
+	if aid != "":
+		return "id:" + aid
+	var sig := str(act.get("label", ""))
+	if act.has("months"):
+		sig += "|m" + str(act["months"])
+	if act.has("special"):
+		sig += "|s" + str(act["special"])
+	if act.get("gain") is Dictionary:
+		var keys: Array = (act["gain"] as Dictionary).keys()
+		keys.sort()
+		sig += "|g" + ",".join(keys)
+	return "sig:" + sig
+
+
+func _cooldown_ready(label: String) -> bool:
+	# 同一件事在冷却期内不能再做（冷却从"这次做完之后"开始算）
+	if label == "":
+		return true
+	var now := _month_index()
+	var ready_at := int(action_cooldown.get(label, 0))
+	if ready_at > now:
+		_toast("这事刚做过，再过 %d 个月。" % (ready_at - now), Color(0.62, 0.24, 0.18))
+		return false
+	return true
+
+
+func _cooldown_commit(label: String, months: int) -> void:
+	if label == "":
+		return
+	action_cooldown[label] = _month_index() + maxi(1, months)
+
+
 func _on_action(act: Dictionary) -> void:
 	if ended:
 		return
@@ -2981,19 +5193,41 @@ func _on_action(act: Dictionary) -> void:
 				_toast("还做不了这个。", Color(0.62, 0.24, 0.18))
 				return
 
+	# M1-02：冷却检查必须在扣钱、关面板之前
+	if not _cooldown_ready(_action_key(act)):
+		return
+
 	money -= cost
 	panel.visible = false
 	busy = false
+	var acting_pov := pov
 	# 平常做事不花时间，时间自己走；只有"大事"（半年以上的活）才跳过一段
 	var m := int(act.get("months", 1))
 	if m >= 6:
 		_advance_months(m)
+		# A01：跳过的时间可能已经把人跳死了，死亡优先于本次行动的收益
+		if ended:
+			print("[ACTION] interrupted_before_reward ", str(act.get("label", "")))
+			return
+		# 父母在跳时中死去会把视角切回孩子：这份收益不能记到孩子头上
+		if pov != acting_pov:
+			print("[ACTION] interrupted_by_pov_change ", acting_pov, "->", pov)
+			return
 	if act.has("gain"):
 		_apply_gain(act["gain"])
 	if act.has("special"):
 		_apply_special(str(act["special"]))
+		# 战死等特殊效果会在这里结束人生，后续不再发奖、不再写普通存档
+		if ended:
+			print("[ACTION] interrupted_after_special ", str(act.get("label", "")))
+			return
+		if pov != acting_pov:
+			print("[ACTION] interrupted_by_pov_change ", acting_pov, "->", pov)
+			return
 	if act.has("flag"):
 		story[str(act["flag"])] = true
+	# M1-02：结算完成后才开始计时，长期行动已用自己的 months 付过账
+	_cooldown_commit(_action_key(act), int(act.get("months", 1)))
 	if act.has("flavor"):
 		_toast(str(act["flavor"]), Color(0.30, 0.26, 0.21))
 	var got_money := false
@@ -3072,6 +5306,7 @@ func _apply_special(s: String) -> void:
 		spouse_name = "李氏"
 		story["married"] = true
 		story["meiren_done"] = true
+		_log_fact("marriage", "meiren", {"spouse": spouse_name})
 	elif s == "pay_debt":
 		story.erase("欠李婶")
 		story["清账"] = true
@@ -3138,7 +5373,7 @@ func _apply_special(s: String) -> void:
 			"你回家把针线盒擦了一遍，坐在灯下绣到三更。",
 		], false)
 	elif s == "w_midwife":
-		if randf() < 0.85:
+		if _arnd() < 0.85:
 			fame = minf(100.0, fame + 5.0)
 			_toast("母子平安。主家给你包了红纸，还提了一篮鸡蛋。", Color(0.30, 0.42, 0.22))
 		else:
@@ -3161,7 +5396,7 @@ func _apply_special(s: String) -> void:
 			"你摸了摸袖口那方旧帕子——那是你绣的第一件。",
 		], false)
 	elif s == "stall":
-		var earn := 300 + randi_range(0, 600)
+		var earn := 300 + _arndi(0, 600)
 		money += earn
 		fame = minf(100.0, fame + 1.0)
 		if trade_rank == 0:
@@ -3171,12 +5406,12 @@ func _apply_special(s: String) -> void:
 		else:
 			_toast("一个月下来赚了 %d 文，被差役撵了两回。" % earn, Color(0.30, 0.26, 0.21))
 	elif s == "caravan":
-		if randf() < 0.6:
-			var gain := randi_range(2000, 3600)
+		if _arnd() < 0.6:
+			var gain := _arndi(2000, 3600)
 			money += gain
 			_toast("这趟货卖得顺，赚了 %d 文。" % gain, Color(0.30, 0.42, 0.22))
 		else:
-			var loss := randi_range(400, 1000)
+			var loss := _arndi(400, 1000)
 			money = maxi(0, money - loss)
 			_toast("路上连日下雨，货烂了一半，亏了 %d 文。" % loss, Color(0.62, 0.24, 0.18))
 	elif s == "sedentary":
@@ -3222,7 +5457,7 @@ func _apply_special(s: String) -> void:
 			"你背着箱子出门，觉得箱子比想的沉。",
 		], false)
 	elif s == "med_visit":
-		if randf() < 0.75:
+		if _arnd() < 0.75:
 			money += 2200
 			fame = minf(100.0, fame + 4.0)
 			_toast("这一趟治好了，主家塞给你两贯钱，还提了一篮鸡蛋。", Color(0.30, 0.42, 0.22))
@@ -3297,7 +5532,7 @@ func _apply_special(s: String) -> void:
 		_leave_old_line("mil")
 		_toast("你报了名，领一口刀、两斗米。名册上不写名字，写「某乡某人」。", Color(0.30, 0.26, 0.21))
 	elif s == "expedition":
-		if randf() < 0.10:
+		if _arnd() < 0.10:
 			death_cause = "战死"
 			_die_young()
 			return
@@ -3306,7 +5541,7 @@ func _apply_special(s: String) -> void:
 		health = maxf(0.0, health - 6.0)
 		_toast("这一仗打完了，你在死人堆里坐了很久。战功记了一次。", Color(0.30, 0.26, 0.21))
 	elif s == "expedition2":
-		if randf() < 0.08:
+		if _arnd() < 0.08:
 			death_cause = "战死"
 			_die_young()
 			return
@@ -3329,7 +5564,7 @@ func _apply_special(s: String) -> void:
 			"你穿上新甲走到校场，看底下的人跟你从前一样站着。",
 		], false)
 	elif s == "patrol":
-		if randf() < 0.12:
+		if _arnd() < 0.12:
 			death_cause = "战死"
 			_die_young()
 			return
@@ -3339,7 +5574,8 @@ func _apply_special(s: String) -> void:
 	elif s == "take_post":
 		office_rank = 1
 		var names := ["吴县", "长洲", "常熟", "昆山", "嘉定", "华亭"]
-		county = str(names[randi() % names.size()])
+		var picked: Variant = _pick_from(names)
+		county = str(picked) if picked is String else str(names[0])
 		var bonus_note := ""
 		if mil_rank >= 2:
 			gov_merit += 2
@@ -3353,7 +5589,7 @@ func _apply_special(s: String) -> void:
 			bonus_note if bonus_note != "" else "案上堆着没批完的状子，最上面一张写着「田界」。",
 		], false)
 	elif s == "judge_fair":
-		if randf() < 0.60:
+		if _arnd() < 0.60:
 			gov_merit += 2
 			fame = minf(100.0, fame + 3.0)
 			_toast("判得公，两造都服。县里传你是个明白官。", Color(0.30, 0.42, 0.22))
@@ -3388,9 +5624,10 @@ func _apply_special(s: String) -> void:
 		_toast("你递了告老的状子。回乡那天，只有两个老吏送到城外。", Color(0.30, 0.26, 0.21))
 	elif s == "jieshi":
 		var p := clampf(0.10 + learning * 0.010, 0.05, 0.90)
-		if randf() < p:
+		if _arnd() < p:
 			story["举人"] = true
 			fame = minf(100.0, fame + 18.0)
+			_log_fact("exam", "jieshi_pass", {"year": year})
 			_play_cutscene("解 试", [
 				"榜贴在州学墙上，人挤得水泄不通。",
 				"你从最后一行往前看，看见了自己的名字。",
@@ -3398,10 +5635,11 @@ func _apply_special(s: String) -> void:
 			], false)
 		else:
 			fame = maxf(0.0, fame - 1.0)
+			_log_fact("exam", "jieshi_fail", {"year": year})
 			_toast("解试落第。你在贡院外站到人都散了。", Color(0.62, 0.24, 0.18))
 	elif s == "shengshi":
 		var p2 := clampf(-0.08 + learning * 0.008, 0.04, 0.85)
-		if randf() < p2:
+		if _arnd() < p2:
 			story["进士"] = true
 			fame = minf(100.0, fame + 30.0)
 			money += 4000
@@ -3412,43 +5650,114 @@ func _apply_special(s: String) -> void:
 			], false)
 		else:
 			fame = maxf(0.0, fame - 2.0)
+			_log_fact("exam", "shengshi_fail", {"year": year})
 			_toast("省试落第。盘缠花光了，你在京城住了半年才凑够路费。", Color(0.62, 0.24, 0.18))
 
 
 # ---------------------------------------------------------------- 时间
 
+func _kill_current_actor(cause: String) -> void:
+	# 唯一死亡入口：时间推进、行动/对话/事件效果、战死都走这里
+	# 孩子死 = 整局结束；父母死 = 登记在本人名下，孩子继续过
+	if ended:
+		return
+	death_cause = cause
+	if pov == "child":
+		_ending()
+	else:
+		_parent_death()
+
+
+func _trigger_actor_end() -> void:
+	_kill_current_actor("寿终")
+
+
 func _advance_months(n: int) -> void:
 	for i in range(n):
+		# 已经到寿或已垮掉的人，不再推进时间，也不留下未结算的收益
+		if age >= lifespan or health <= 0.0:
+			_trigger_actor_end()
+			return
 		month += 1
+		# M2-11：已安排的事件按真实月份到期，不依赖当年是否又抽中了新机会
+		_drain_due_events()
+		if ended:
+			return
 		if shop_open:
-			shop["market"] = clampf(float(shop.get("market", 1.0)) + randf_range(-0.045, 0.045), 0.70, 1.40)
-			if randf() < 0.10:
-				shop["rival"] = randi_range(0, 2)
+			shop["market"] = clampf(float(shop.get("market", 1.0)) + _rndf(-0.045, 0.045), 0.70, 1.40)
+			if _arnd() < 0.10:
+				shop["rival"] = _rndi(0, 2)
 		if month > 12:
 			month = 1
 			year += 1
 			age += 1
-			# 所有人一起长一岁——你替父亲过日子的时候，孩子也在长大
-			for k in pov_state.keys():
-				var st: Dictionary = pov_state[k]
-				st["age"] = int(st.get("age", age)) + 1
+			# 所有人一起长一岁：当前操控者在全局字段上，其余人在 actor_vitals 上
+			for k in actor_vitals.keys():
+				if str(k) == pov:
+					continue
+				var av: Dictionary = actor_vitals[k]
+				av["age"] = int(av.get("age", 0)) + 1
 			_on_new_year()
-			if not ended and (age >= lifespan or health <= 0.0):
-				if pov == "child":
-					_ending()
-				else:
-					_parent_death()
+			if age >= lifespan or health <= 0.0:
+				_trigger_actor_end()
 				return
-		if age >= lifespan or health <= 0.0:
-			return
+
+
+func _household_year_cost() -> int:
+	# M1-01b：年关按户算，与当前操控谁无关；已故的人不再吃饭
+	var total := 0
+	var members: Array = []
+	members.append({"age": age})
+	for k in actor_vitals.keys():
+		var key := str(k)
+		if key == pov:
+			continue
+		if bool(parent_dead.get(key, false)):
+			continue
+		members.append(actor_vitals[key])
+	for m in members:
+		total += 150 + int((m as Dictionary).get("age", 0)) * 2
+	if married:
+		total += 200
+		total += children * 180
+		total += land * 18
+	return total
+
+
+func _decay_health(age_v: int, hp: float) -> float:
+	# 48 岁后每年掉一点，60 岁后掉得更快
+	var h := hp
+	if age_v > 48:
+		h -= 0.8
+	if age_v > 60:
+		h -= 1.4
+	return maxf(0.0, h)
 
 
 func _on_new_year() -> void:
+	# M1-02b：年关每年只结算一次，防重入（过场、嵌套推进、重复调用）
+	if last_settled_year >= year:
+		print("[YEAR] settle_skipped year=", year, " last=", last_settled_year)
+		return
+	last_settled_year = year
+	boundary_log = ["aging"]
 	scenes_done.clear()
-	if age > 48:
-		health = maxf(0.0, health - 0.8)
-	if age > 60:
-		health = maxf(0.0, health - 1.4)
+	# M1-02c：每个活着的人各自老化扣血，不因当前操控谁而改变
+	health = _decay_health(age, health)
+	for k in actor_vitals.keys():
+		var kid := str(k)
+		if kid == pov:
+			actor_vitals[kid] = {"age": age, "health": health, "lifespan": lifespan}
+			continue
+		var st: Dictionary = actor_vitals[kid]
+		var st_age := int(st.get("age", 0))
+		var st_hp := _decay_health(st_age, float(st.get("health", 100.0)))
+		st["health"] = st_hp
+		var st_life := int(st.get("lifespan", 100))
+	# 家人（含非当前视角的孩子）统一判死；当前视角的死留到 settle 之前按 death_active 处理
+	_kin_death_pass()
+	if ended:
+		return
 	if health <= 0.0:
 		lifespan = age
 	if age == 1 and not milestones.has("zhuazhou"):
@@ -3494,13 +5803,15 @@ func _on_new_year() -> void:
 			"父亲把刀递给你，又收了回去——那是他当兵时留下的。",
 			"从此以后，这个家要你自己撑了。",
 		], false)
-	# 年关：吃穿用度与赋税
+	# M1-05b：死亡判定先于本年的一切结算与收益（同 tick 里死者不再经历这一年）
+	if age >= lifespan or health <= 0.0:
+		boundary_log.append("death_active")
+		_trigger_actor_end()
+		return
+
+	# 年关：吃穿用度与赋税（按户结算，见 _household_year_cost）
 	if age >= 8:
-		var cost := 300 + age * 4
-		if married:
-			cost += 200
-		cost += children * 180
-		cost += land * 18
+		var cost := _household_year_cost()
 		if shop_open and bool(shop.get("helper", false)):
 			cost += 1800
 		if money >= cost:
@@ -3543,7 +5854,13 @@ func _on_new_year() -> void:
 			_toast("今年开科，可赴京应省试。", Color(0.48, 0.32, 0.16))
 		elif story.has("读书") and learning >= 25.0:
 			_toast("今年开科，书院可以应解试。", Color(0.48, 0.32, 0.16))
-	_roll_event()
+	boundary_log.append("settle")
+	last_boundary_fid = _log_fact("year", "boundary", {"year": year})
+	if age < 7:
+		_child_year()	# 蒙养之年：不由玩家选，父母带着过
+	else:
+		_roll_event()
+	boundary_log.append("events")
 	# 生子
 	if age == 30 and married and children == 0 and not milestones.has("child1"):
 		milestones["child1"] = true
@@ -3596,86 +5913,317 @@ func _event_ok(ev: Dictionary) -> bool:
 	return true
 
 
-func _roll_event() -> void:
-	if randf() > 0.32:
-		return
+func _pick_from(pool: Array) -> Variant:
+	# 事件与城名等随机挑选必须走可复现的模拟流，不能用未保存的全局 RNG
+	# 返回 Variant：事件池里是 Dictionary，城名池里是 String，不能都标成 Dictionary
+	if pool.is_empty():
+		return {}
+	return pool[_rndi(0, pool.size() - 1)]
+
+
+## M2-01：事件实例。定义（EVENTS）与实例（event_instances）分开，
+## 实例带到期月份与来源，M2-02 的调度器可以直接排它。
+var event_instances: Array = []
+var event_seq := 0
+## M2-02：机会上次被安排的时间（id → 月序号），用于冷却
+var opp_last: Dictionary = {}
+
+
+func _enqueue_event(id: String, cause: String, due_month: int, cause_fid: int = 0, target: String = "", policy: String = "cancel") -> int:
+	event_seq += 1
+	# M2-01b：事件实例绑定承受者；主体死了按 policy 处理（cancel 取消 / transfer 转给孩子）
+	var who := target
+	if who == "":
+		who = pov
+	event_instances.append({
+		"sid": event_seq, "id": id, "cause": cause, "due": due_month,
+		"fired": false, "cause_fid": cause_fid,
+		"target": who, "policy": policy,
+	})
+	return event_seq
+
+
+func _drain_due_events() -> int:
+	# 到期即触发，且每个实例只触发一次；来源写进事实日志的 cause
+	var fired := 0
+	var now := _month_index()
+	for inst in event_instances:
+		if bool((inst as Dictionary).get("fired", false)):
+			continue
+		if int((inst as Dictionary).get("due", 0)) > now:
+			continue
+		inst["fired"] = true
+		# M2-01c：先结算，再按结果写不同种类的事实——取消/转移不算"真的发生过"
+		var before_money := money
+		var before_land := land
+		var from_target := str(inst.get("target", ""))
+		var status := _apply_event_for(from_target, str(inst["id"]),
+			str(inst.get("policy", "cancel")))
+		var ev_fid := 0
+		if status == "transferred":
+			ev_fid = _log_fact("event", str(inst.get("cause", "unknown")),
+				{"id": str(inst["id"]), "sid": int(inst["sid"]),
+				"from": from_target, "to": "child", "result": "transferred"},
+				int(inst.get("cause_fid", 0)))
+			last_event_fid = ev_fid
+			inst["fid"] = ev_fid
+		elif status == "applied":
+			ev_fid = _log_fact("event", str(inst.get("cause", "unknown")),
+				{"id": str(inst["id"]), "sid": int(inst["sid"])}, int(inst.get("cause_fid", 0)))
+			last_event_fid = ev_fid
+			inst["fid"] = ev_fid
+			last_event_fid = ev_fid
+			inst["fid"] = ev_fid
+		else:
+			_log_fact("event_" + status, str(inst.get("cause", "unknown")),
+				{"id": str(inst["id"]), "sid": int(inst["sid"]),
+					"target": str(inst.get("target", "unknown"))}, int(inst.get("cause_fid", 0)))
+		if ev_fid != 0:
+			# M2-03c：事件带来的实际变化单独记一条，指向事件本身
+			var d_money := money - before_money
+			var d_land := land - before_land
+			if d_money != 0 or d_land != 0:
+				_log_fact("consequence", "event_effect",
+					{"id": str(inst["id"]), "money": d_money, "land": d_land}, ev_fid)
+		fired += 1
+		if ended:
+			# M2-01e：本局已结束，同月后续事件一律不再执行；未执行的留在队列里冻结
+			var left := 0
+			for rest in event_instances:
+				if not bool((rest as Dictionary).get("fired", false)):
+					left += 1
+			_log_fact("game_over", "queue_frozen", {"remaining": left})
+			break
+	var alive_list: Array = []
+	for inst in event_instances:
+		if not bool((inst as Dictionary).get("fired", false)):
+			alive_list.append(inst)
+	event_instances = alive_list.slice(maxi(0, alive_list.size() - 64))
+	return fired
+
+
+func _eligible_opportunities() -> Array:
+	# M2-02：候选 = 条件满足 + 冷却已过
+	var now := _month_index()
 	var pool: Array = []
 	for e in EVENTS:
-		if _event_ok(e):
-			pool.append(e)
+		if not _event_ok(e):
+			continue
+		var eid := str((e as Dictionary).get("id", ""))
+		var cd := int((e as Dictionary).get("cooldown", 24))
+		if opp_last.has(eid) and now - int(opp_last[eid]) < cd:
+			continue
+		pool.append(e)
+	return pool
+
+
+func _weighted_pick(pool: Array) -> Dictionary:
+	var total := 0.0
+	for e in pool:
+		total += float((e as Dictionary).get("weight", 1))
+	if total <= 0.0:
+		return {}
+	var roll := _rnd() * total
+	for e in pool:
+		roll -= float((e as Dictionary).get("weight", 1))
+		if roll <= 0.0:
+			return e
+	return pool[pool.size() - 1]
+
+
+func _roll_event() -> void:
+	# M2-02：年度机会调度——先过滤冷却与条件，再按权重抽，入队后按期触发
+	if not events_enabled:
+		return
+	if _rnd() > 0.32:
+		return
+	var pool := _eligible_opportunities()
 	if pool.is_empty():
 		return
-	var ev: Dictionary = pool[randi() % pool.size()]
-	_apply_event(str(ev["id"]))
+	var ev := _weighted_pick(pool)
+	if ev.is_empty():
+		return
+	var eid := str(ev["id"])
+	opp_last[eid] = _month_index()
+	_enqueue_event(eid, "opportunity", _month_index() + _rndi(0, 2), last_boundary_fid)
+	_drain_due_events()
+
+
+func _apply_event_effects(def: Dictionary) -> void:
+	var eff: Dictionary = def.get("effects", {})
+	var d_money := int(eff.get("money", 0))
+	var d_health := float(eff.get("health", 0.0))
+	var d_fame := float(eff.get("fame", 0.0))
+	if d_money != 0:
+		money = maxi(0, money + d_money)
+	if d_health != 0.0:
+		health = clampf(health + d_health, 0.0, 100.0)
+	if d_fame != 0.0:
+		fame = clampf(fame + d_fame, 0.0, 100.0)
+	if eff.has("story"):
+		story[str(eff["story"])] = true
+	var txt := str(def.get("text", ""))
+	if txt != "":
+		var bad_news: bool = d_money < 0 or d_health < 0.0 or d_fame < 0.0
+		_toast(txt, Color(0.62, 0.24, 0.18) if bad_news else Color(0.30, 0.42, 0.22))
+
+
+func _actor_can_die(who: String) -> bool:
+	# 达到死亡条件：健康归零或年龄到寿。和"是否已结算"是两件事
+	var v := _vitals_of(who)
+	return float(v["health"]) <= 0.0 or int(v["age"]) >= int(v["lifespan"])
+
+
+func _actor_is_dead(who: String) -> bool:
+	# 已经完成死亡结算
+	if who == "child":
+		return ended
+	return bool(parent_dead.get(who, false))
+
+
+func _apply_event_for(who: String, id: String, policy: String) -> String:
+	# 返回结算结果：applied / transferred / cancelled_dead_target / cancelled_unknown_target
+	# 由 _drain_due_events 写入不同种类的事实，避免"取消"被当成"发生过"
+	if who == "":
+		# 旧档没有记录主体：不假装恢复，也不静默交给孩子
+		return "cancelled_unknown_target"
+	var target := who
+	var child_available: bool = not _actor_is_dead("child") and not _actor_can_die("child")
+	if _actor_is_dead(target) or _actor_can_die(target):
+		if policy == "transfer" and child_available:
+			_apply_event_to_actor("child", id)
+			return "transferred"
+		return "cancelled_dead_target"
+	_apply_event_to_actor(target, id)
+	return "applied"
+
+
+func _apply_event_to_actor(who: String, id: String) -> void:
+	if who == pov:
+		_apply_event(id)
+		# 当前人物的事件效果也要在本次结算里判死，不能等到下个月推进
+		_check_actor_deaths()
+		return
+	_apply_event_to_inactive(who, id)
+
+
+func _settle_actor_death(who: String, cause: String) -> void:
+	# 按 actor_id 结算死亡：孩子死 = 这一局结束；父母死 = 登记在本人名下
+	if _actor_is_dead(who):
+		return
+	if who == "child":
+		if pov != "child":
+			_switch_pov("child")
+		death_cause = cause
+		_ending()
+		return
+	parent_dead[who] = true
+	parent_death_year[who] = year
+	parents_alive = maxi(0, parents_alive - 1)
+	_log_fact("death", cause, {"who": who, "age": int(_vitals_of(who)["age"])})
+	if pov == who:
+		_switch_pov("child")
+	_spawn_npcs()
+	_refresh_pov_bar()
+
+
+func _check_actor_deaths() -> void:
+	# 任何人（含非当前视角）健康归零或到寿，都走同一条死亡结算
+	for id in ["child", "father", "mother"]:
+		if ended:
+			return
+		var who := str(id)
+		if _actor_is_dead(who):
+			continue
+		if not _actor_can_die(who):
+			continue
+		var v := _vitals_of(who)
+		_settle_actor_death(who, "old_age" if int(v["age"]) >= int(v["lifespan"]) else "health")
+
+
+func _kin_death_pass() -> void:
+	# 年边界：先结算不在当前视角的家人（含孩子），当前视角的死在 settle 之前单独处理
+	for id in ["father", "mother", "child"]:
+		var who := str(id)
+		if who == pov or _actor_is_dead(who):
+			continue
+		if not _actor_can_die(who):
+			continue
+		if not boundary_log.has("death"):
+			boundary_log.append("death")
+		var v := _vitals_of(who)
+		_settle_actor_death(who, "old_age" if int(v["age"]) >= int(v["lifespan"]) else "health")
+		if ended:
+			return
+
+
+func _apply_event_to_inactive(who: String, id: String) -> void:
+	if not pov_state.has(who):
+		pov_state[who] = {}
+	var st: Dictionary = pov_state[who]
+	var v: Dictionary = actor_vitals.get(who, {"age": 0, "health": 80.0, "lifespan": 60})
+	var def := DB.event_def(id)
+	if def.has("effects"):
+		var eff: Dictionary = def.get("effects", {})
+		var d_money := int(eff.get("money", 0))
+		if d_money != 0:
+			money = maxi(0, money + d_money)
+		var d_hp := float(eff.get("health", 0.0))
+		if d_hp != 0.0:
+			v["health"] = clampf(float(v.get("health", 80.0)) + d_hp, 0.0, 100.0)
+		var d_fame := float(eff.get("fame", 0.0))
+		if d_fame != 0.0:
+			st["fame"] = clampf(float(st.get("fame", 0.0)) + d_fame, 0.0, 100.0)
+		if eff.has("story"):
+			var sd: Dictionary = st.get("story", {})
+			sd[str(eff["story"])] = true
+			st["story"] = sd
+	else:
+		match id:
+			"plague":
+				var med := int(st.get("med_rank", 0))
+				v["health"] = maxf(0.0, float(v.get("health", 80.0)) - (2.0 if med >= 3 else 7.0))
+			"harvest":
+				var land_n := int(st.get("land", 0))
+				money += maxi(300, land_n * 60)
+	actor_vitals[who] = v
+	pov_state[who] = st
+	# 扣到 0 健康也要按 actor_id 走死亡结算，不能留一个"活的死人"
+	_check_actor_deaths()
 
 
 func _apply_event(id: String) -> void:
+	# M3-03：能用数据描述的事件都走 _apply_event_effects；只有需要按状态计算的留在这里
+	var def := DB.event_def(id)
+	if def.has("effects"):
+		_apply_event_effects(def)
+		return
 	var bad := Color(0.62, 0.24, 0.18)
 	var good := Color(0.30, 0.42, 0.22)
 	match id:
-		"drought":
-			money = maxi(0, money - 700)
-			health = maxf(0.0, health - 3.0)
-			_toast("春旱，河断了流。粮价涨了三成，家里先紧着吃。", bad)
-		"flood":
-			money = maxi(0, money - 900)
-			_toast("夏水暴涨，冲了低处的田。修堤又摊了一笔钱。", bad)
-		"levy":
-			money = maxi(0, money - 500)
-			fame = maxf(0.0, fame - 1.0)
-			_toast("官府加派杂税，里正挨家收钱。", bad)
-		"thieves":
-			money = maxi(0, money - 600)
-			health = maxf(0.0, health - 2.0)
-			_toast("夜里进了贼，翻走了箱底的现钱。", bad)
 		"plague":
+			# 按医者等级分档，数据表达不了
 			if med_rank >= 3:
 				health = maxf(0.0, health - 2.0)
 				_toast("疫气进了村。你懂医，早早闭门煮药，只病了一场小的。", good)
 			else:
 				health = maxf(0.0, health - 7.0)
 				_toast("疫气进了村，你躺了两个月，差点没起来。", bad)
-		"suit":
-			money = maxi(0, money - 800)
-			fame = maxf(0.0, fame - 2.0)
-			_toast("被人告了一状，赔钱不说，还落了个不是。", bad)
-		"wedding":
-			money = maxi(0, money - 300)
-			fame = minf(100.0, fame + 3.0)
-			_toast("邻家嫁女，随了三百文的礼。席上吃了两碗。", good)
 		"harvest":
+			# 收益按田亩算，数据表达不了
 			var gain := maxi(300, land * 60)
 			money += gain
 			_toast("今年风调雨顺，田里多收了 %d 文。" % gain, good)
-		"reward":
-			money += 1200
-			fame = minf(100.0, fame + 8.0)
-			_toast("县里旌表善行，赏了一千二百文。", good)
-		"school":
-			money = maxi(0, money - 500)
-			fame = minf(100.0, fame + 2.0)
-			_toast("孩子到了开蒙的年纪，束脩又是一笔。", bad)
-		"rash":
-			health = maxf(0.0, health - 3.0)
-			story["出疹子"] = true
-			_toast("你出了一身疹子，母亲守了三夜，用凉水给你擦身。", bad)
-		"riverfall":
-			health = maxf(0.0, health - 2.0)
-			fame = minf(100.0, fame + 1.0)
-			story["落水"] = true
-			_toast("你掉进河里，被撑船的捞了上来。母亲抱着你哭了很久。", bad)
-		"find_coin":
-			money += 50
-			_toast("你在墙根下捡到一枚铜钱，攥了一天，最后还是交给了母亲。", good)
-		"quarrel":
-			fame = maxf(0.0, fame - 1.0)
-			_toast("邻家孩子抢了你的糖，你俩在泥地里滚成一团。", bad)
+		_:
+			push_warning("[EVENT] 没有实现也没有 effects: " + id)
+
+
 
 
 func _die_young() -> void:
 	health = 0.0
 	lifespan = age
-	_ending()
+	_kill_current_actor("战死")
 
 
 func _ending() -> void:
@@ -3798,6 +6346,98 @@ func given_text() -> String:
 	return name_text.substr(1) if name_text.length() > 1 else name_text
 
 
+func _event_name(id: String) -> String:
+	for e in EVENTS:
+		if str((e as Dictionary).get("id", "")) == id:
+			return str((e as Dictionary).get("name", id))
+	return id
+
+
+func _age_at_month(t: int) -> int:
+	return int(t / 12) - birth_year
+
+
+func _consequence_of(fid: int) -> Dictionary:
+	for f in facts:
+		var fd: Dictionary = f
+		if str(fd.get("kind", "")) == "consequence" and int(fd.get("cause_fid", 0)) == fid:
+			return fd
+	return {}
+
+
+func _consequence_phrase(cq: Dictionary) -> String:
+	if cq.is_empty():
+		return ""
+	# 后果的数值存在 data 里，不在事实顶层
+	var cq_data: Dictionary = cq.get("data", {})
+	var d_land := int(cq_data.get("land", 0))
+	var d_money := int(cq_data.get("money", 0))
+	if d_land < 0:
+		return "，家里卖掉%d亩田" % -d_land
+	if d_land > 0:
+		return "，家里添了%d亩田" % d_land
+	if d_money < 0:
+		return "，贴进去%s文" % DB.cn(-d_money)
+	if d_money > 0:
+		return "，进项%s文" % DB.cn(d_money)
+	return ""
+
+
+func _story_lines() -> Array:
+	# M2-03b：用事实日志写人话。只写真实发生过的，且越晚越靠后
+	var lines: Array = []
+	var picked := 0
+	for f in facts:
+		if picked >= 3:
+			break
+		var fd: Dictionary = f
+		var kind := str(fd.get("kind", ""))
+		var age_at := _age_at_month(int(fd.get("t", 0)))
+		if age_at < 0 or age_at > 120:
+			continue
+		if kind == "event":
+			var eid := str((fd.get("data", {}) as Dictionary).get("id", ""))
+			var cq := _consequence_of(int(fd.get("fid", 0)))
+			lines.append("%s岁那年，%s%s。" % [DB.cn(age_at), _event_name(eid), _consequence_phrase(cq)])
+			picked += 1
+		elif kind == "exam":
+			var cause := str(fd.get("cause", ""))
+			if cause == "jieshi_pass":
+				lines.append("%s岁，解试中。" % DB.cn(age_at))
+				picked += 1
+			elif cause == "jieshi_fail":
+				lines.append("%s岁，解试落第。" % DB.cn(age_at))
+				picked += 1
+	return lines
+
+
+func _facts_trace() -> String:
+	# M1-03c：墓志必须引用真实发生过的事，而不是只拼终值
+	if facts.is_empty():
+		return ""
+	var counts := {}
+	for f in facts:
+		var k := str((f as Dictionary).get("kind", ""))
+		counts[k] = int(counts.get(k, 0)) + 1
+	var parts: Array = []
+	if counts.has("exam"):
+		parts.append("应试%d次" % int(counts["exam"]))
+	if counts.has("event"):
+		parts.append("逢变故%d次" % int(counts["event"]))
+	if counts.has("marriage"):
+		parts.append("成家一次")
+	if counts.has("death"):
+		parts.append("送亲%d人" % int(counts["death"]))
+	if parts.is_empty():
+		return ""
+	var s := ""
+	for i in range(parts.size()):
+		if i > 0:
+			s += "、"
+		s += str(parts[i])
+	return "一生所记：" + s + "。"
+
+
 func _epitaph() -> Array:
 	var lines: Array = []
 	var tier := _tier()
@@ -3850,6 +6490,11 @@ func _epitaph() -> Array:
 		lines.append("子%d人。" % children)
 	else:
 		lines.append("无子。")
+	var trace := _facts_trace()
+	if trace != "":
+		lines.append(trace)
+	for story_line in _story_lines():
+		lines.append(str(story_line))
 	if int(story.get("欠年", 0)) >= 3:
 		lines.append("晚年家道中落，靠乡邻接济度日。")
 	if story.has("赖账"):

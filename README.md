@@ -98,7 +98,31 @@ $g = "D:\Developer\Godot\4.7.2-stable\Godot_v4.7.2-stable_win64_console.exe"
 & $g --path "." -- --stage=village_load
 ```
 
-`--fresh` 会先删掉存档，保证截到的是新开局。
+`--fresh` 只在**隔离数据目录**且设置 `LIFE_ALLOW_SAVE_WIPE=1` 时才会删档；否则拒绝执行并打印警告，避免误删玩家存档。上面的调试命令请改用下面的验证入口。
+
+## 验证
+
+```powershell
+$g = "D:\Developer\Godot\4.7.2-stable\Godot_v4.7.2-stable_win64_console.exe"
+pwsh -File tools/verify.ps1 -GodotPath $g
+```
+
+`tools/verify.ps1` 会：
+
+1. 复制项目到临时目录，把 `config/name` 改成 `LifeVerify-<id>`，让 `user://` 落到独立目录；
+2. 运行 `--headless --stage=verify_smoke --fresh`，断言逐条打印 `[VERIFY] PASS/FAIL`；
+3. 结束后确认**玩家真实存档目录未被触碰**；
+4. 退出码：`0` 全过 / `1` 有断言失败 / `2` 环境或隔离失败。
+
+`--stage=` 分三类，只有第一类是验收手段：
+
+| 类别 | 例子 | 是否作为验收 |
+|---|---|---|
+| **行为断言** | `verify_smoke` | 是，带退出码 |
+| 演示 | `village`, `village_night`, `village_shop` | 否，仅供人看 |
+| 截图 | 任意配合 `--shot=` | 否，只证明某帧能渲染 |
+
+证据与限制见 [docs/verification/M0-02.md](docs/verification/M0-02.md)。
 
 ## 目录
 
@@ -119,8 +143,10 @@ docs/shots/                  界面截图
 
 ## 已知缺口
 
-见 [docs/GDD.md](docs/GDD.md) 第 9 节。最要紧的三条：
+完整的静态审计见 [docs/strategy/00_REPOSITORY_AUDIT.md](docs/strategy/00_REPOSITORY_AUDIT.md)，摘要见 [docs/GDD.md](docs/GDD.md) 第 9 节。当前最要紧的是三条工程缺陷，而不是内容量：
 
-1. **村子偏空**——12 处地点铺在 3200×1900 上，走两步就是草地
-2. **没有科举**——读书只涨学识，换不到功名，"士"这条人生路径是断的
-3. **钱没有去处**——会玩的人临死剩十几万文，除了墓志上多句话，没有别的意义
+1. **A01 死亡不是可靠的结算终点**——行动跨过寿终时可能仍然发奖，清档后又写入普通存档
+2. **A02 存档不完整**——父亲行当、母亲性情、妇业级别、节令记录、流速等未入档，读档后可能变回新随机值
+3. **A03 死亡与旧档缺字段同状态**——父母死亡用"从状态里删除"表示，读档又按旧档补生成，可能复活
+
+内容层面的已知问题：墓志偏重功名，普通与独身人生容易落到"余无可书"（A10）。

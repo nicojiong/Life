@@ -4,6 +4,7 @@ extends Node
 var era: Dictionary = {}
 var origins: Array = []
 var names: Dictionary = {}
+var events: Array = []
 var loaded := false
 
 
@@ -37,7 +38,10 @@ func load_all() -> void:
 	names = _load_json("res://data/names.json")
 	if names == null:
 		names = {}
-	print("[DB] 出身 %d 种，年号 %d 个" % [origins.size(), era.get("eras", []).size()])
+	events = _load_json("res://data/events.json")
+	if events == null:
+		events = []
+	print("[DB] 出身 %d 种，年号 %d 个，事件 %d 条" % [origins.size(), era.get("eras", []).size(), events.size()])
 	loaded = true
 
 
@@ -110,3 +114,10 @@ func cn(n: int) -> String:
 	if rest % 10 != 0:
 		t += str(d[rest % 10])
 	return t
+
+
+func event_def(id: String) -> Dictionary:
+	for e in events:
+		if str((e as Dictionary).get("id", "")) == id:
+			return e
+	return {}

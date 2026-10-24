@@ -18,7 +18,11 @@ func _ready() -> void:
 	_parse_args()
 
 	if _has_arg("--fresh"):
-		_clear_save()
+		# 只有显式声明测试环境才允许删档，防止误删真实存档
+		if OS.get_environment("LIFE_ALLOW_SAVE_WIPE") == "1" and _isolated_user_dir():
+			_clear_save()
+		else:
+			push_warning("--fresh 被拒绝：需要在隔离数据目录下并设置 LIFE_ALLOW_SAVE_WIPE=1")
 
 	_show_stage(shot_stage)
 
@@ -74,6 +78,18 @@ func show_village() -> Control:
 
 func _show_stage(stage: String) -> void:
 	match stage:
+		"continuity_a":
+			var ca = show_village()
+			ca.call_deferred("_run_continuity_a", _arg_value("--seed", "20261024"), int(_arg_value("--steps", "6")), _arg_value("--out", "user://cont_a.json"), _arg_value("--scenario", "plain"))
+		"continuity_b":
+			var cb = show_village()
+			cb.call_deferred("_run_continuity_b", int(_arg_value("--steps", "6")), _arg_value("--out", "user://cont_b0.json"), _arg_value("--out2", "user://cont_b1.json"))
+		"continuity_c":
+			var cc = show_village()
+			cc.call_deferred("_run_continuity_c", _arg_value("--seed", "20261024"), int(_arg_value("--steps", "6")), int(_arg_value("--steps2", "6")), _arg_value("--out", "user://cont_c.json"), _arg_value("--scenario", "plain"))
+		"verify_smoke":
+			var v = show_village()
+			v.call_deferred("_run_verify_smoke")
 		"village_night":
 			var a = show_village()
 			a.hour = 22.0
@@ -328,6 +344,11 @@ func _clear_save() -> void:
 	for f in ["fusheng_save.json", "fusheng_save_1.json", "fusheng_save_2.json", "fusheng_save_3.json"]:
 		if FileAccess.file_exists("user://" + f):
 			dir.remove(f)
+
+
+func _isolated_user_dir() -> bool:
+	# tools/verify.ps1 会把项目复制到临时目录并把 config/name 改成 LifeVerify-<id>
+	return OS.get_user_data_dir().find("LifeVerify") >= 0
 
 
 func _capture_after(frames: int) -> void:
