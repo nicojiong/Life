@@ -53,10 +53,12 @@
                                          "现有stage明确区分演示、截图与行为断言；--fresh不接触玩家存档",
                                          "在可用的CI环境接通同一最小验证入口；权限或运行器不可用时如实标blocked，不宣称CI完成"
                                      ],
-                      "status":  "todo",
+                      "status":  "implemented",
                       "owner":  null,
                       "evidence":  [
-
+                                       "docs/verification/M0-02.md",
+                                       "docs/tasks/M0-02.md",
+                                       "tools/verify.ps1"
                                    ],
                       "commit_sha":  null,
                       "remote_sha":  null,

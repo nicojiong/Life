@@ -642,6 +642,57 @@ func debug_scene_panel() -> void:
 	print("[SCENE] 下个节令=", nxt.get("name", "无"))
 
 
+func _run_verify_smoke() -> void:
+	# 行为断言入口：失败必须以非零退出码结束，供 tools/verify.ps1 判定
+	busy = false
+	var fails: Array = []
+	var oks := 0
+
+	if OS.get_user_data_dir().find("LifeVerify") >= 0:
+		oks += 1
+		print("[VERIFY] PASS isolated_user_dir ", OS.get_user_data_dir())
+	else:
+		fails.append("isolated_user_dir")
+		print("[VERIFY] FAIL isolated_user_dir ", OS.get_user_data_dir())
+
+	if DB.origins.size() == 10:
+		oks += 1
+		print("[VERIFY] PASS origins_count 10")
+	else:
+		fails.append("origins_count")
+		print("[VERIFY] FAIL origins_count ", DB.origins.size())
+
+	if age == 0 and not can_walk:
+		oks += 1
+		print("[VERIFY] PASS newborn_state age=0 can_walk=false")
+	else:
+		fails.append("newborn_state")
+		print("[VERIFY] FAIL newborn_state age=", age, " can_walk=", can_walk)
+
+	var money_before := money
+	money = 12345
+	_save_game()
+	money = 1
+	var loaded := _load_game()
+	if loaded and money == 12345:
+		oks += 1
+		print("[VERIFY] PASS save_roundtrip money=12345")
+	else:
+		fails.append("save_roundtrip")
+		print("[VERIFY] FAIL save_roundtrip loaded=", loaded, " money=", money)
+	money = money_before
+
+	if pov_state.has("father") and pov_state.has("mother"):
+		oks += 1
+		print("[VERIFY] PASS parents_present")
+	else:
+		fails.append("parents_present")
+		print("[VERIFY] FAIL parents_present ", pov_state.keys())
+
+	print("[VERIFY] SUMMARY pass=", oks, " fail=", fails.size(), " failed=", fails)
+	get_tree().quit(0 if fails.is_empty() else 1)
+
+
 func debug_scenes() -> void:
 	busy = false
 	scenes_done.clear()
