@@ -2199,6 +2199,75 @@ func _run_verify_smoke() -> void:
 		fails.append("household_cost_pov_consistent")
 		print("[VERIFY] FAIL household_cost_pov_consistent ", hh_child, " ", hh_father, " ", hh_mother)
 
+	# M2-01b：事件绑定承受者——切视角不换人，主体死了按策略处理，存读档保持
+	var keep_ev_pov := pov
+	var keep_ev_inst: Array = (event_instances as Array).duplicate(true)
+	var keep_ev_seq := event_seq
+	var keep_ev_events := events_enabled
+	var keep_ev_age := age
+	var keep_ev_hp := health
+	var keep_ev_money := money
+	events_enabled = false
+	if pov != "child":
+		_switch_pov("child")
+	event_instances = []
+	event_seq = 0
+	# 1) 给孩子排一条，切到父亲后到期：仍然只伤到孩子
+	age = 20
+	health = 80.0
+	var child_hp_before := health
+	_enqueue_event("drought", "test", _month_index(), 0, "child", "cancel")
+	_switch_pov("father")
+	var father_hp_before := health
+	_drain_due_events()
+	_switch_pov("child")
+	var child_hit: bool = health < child_hp_before
+	var father_untouched: bool = is_equal_approx(father_hp_before, float(_vitals_of("father")["health"]))
+	# 2) 主体在到期前死亡 → 取消，不落到当前操控者身上
+	event_instances = []
+	parent_dead["father"] = true
+	var money_before_cancel := money
+	_enqueue_event("drought", "test", _month_index(), 0, "father", "cancel")
+	_drain_due_events()
+	var cancelled_ok: bool = money == money_before_cancel and event_instances.is_empty()
+	parent_dead["father"] = false
+	# 3) 存读档后主体、到期、策略不变
+	event_instances = []
+	var sid_keep := _enqueue_event("plague", "test", _month_index() + 2, 0, "mother", "transfer")
+	_save_game()
+	event_instances = []
+	_load_game()
+	var restored_target := ""
+	var restored_policy := ""
+	var restored_due := -1
+	for inst2 in event_instances:
+		if int((inst2 as Dictionary).get("sid", 0)) == sid_keep:
+			restored_target = str(inst2.get("target", ""))
+			restored_policy = str(inst2.get("policy", ""))
+			restored_due = int(inst2.get("due", -1))
+	var restore_ok: bool = restored_target == "mother" and restored_policy == "transfer" and restored_due == _month_index() + 2
+	# 4) 同一事件只结算一次
+	event_instances = []
+	_enqueue_event("find_coin", "test", _month_index(), 0, "child", "cancel")
+	var first_fire := _drain_due_events()
+	var second_fire := _drain_due_events()
+	var once_ok: bool = first_fire == 1 and second_fire == 0
+	events_enabled = keep_ev_events
+	event_instances = keep_ev_inst
+	event_seq = keep_ev_seq
+	money = keep_ev_money
+	age = keep_ev_age
+	health = keep_ev_hp
+	if pov != keep_ev_pov:
+		_switch_pov(keep_ev_pov)
+	var ev_bind_ok: bool = child_hit and father_untouched and cancelled_ok and restore_ok and once_ok
+	if ev_bind_ok:
+		oks += 1
+		print("[VERIFY] PASS event_actor_binding child=", child_hit, " father=", father_untouched, " cancel=", cancelled_ok, " restore=", restore_ok, " once=", once_ok)
+	else:
+		fails.append("event_actor_binding")
+		print("[VERIFY] FAIL event_actor_binding child=", child_hit, " father=", father_untouched, " cancel=", cancelled_ok, " restore=", restore_ok, " once=", once_ok)
+
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
 	var keep_age := age
@@ -5416,9 +5485,17 @@ var event_seq := 0
 var opp_last: Dictionary = {}
 
 
-func _enqueue_event(id: String, cause: String, due_month: int, cause_fid: int = 0) -> int:
+func _enqueue_event(id: String, cause: String, due_month: int, cause_fid: int = 0, target: String = "", policy: String = "cancel") -> int:
 	event_seq += 1
-	event_instances.append({"sid": event_seq, "id": id, "cause": cause, "due": due_month, "fired": false, "cause_fid": cause_fid})
+	# M2-01b：事件实例绑定承受者；主体死了按 policy 处理（cancel 取消 / transfer 转给孩子）
+	var who := target
+	if who == "":
+		who = pov
+	event_instances.append({
+		"sid": event_seq, "id": id, "cause": cause, "due": due_month,
+		"fired": false, "cause_fid": cause_fid,
+		"target": who, "policy": policy,
+	})
 	return event_seq
 
 
@@ -5439,7 +5516,7 @@ func _drain_due_events() -> int:
 		# M2-03c：事件带来的实际变化单独记一条，指向事件本身
 		var before_money := money
 		var before_land := land
-		_apply_event(str(inst["id"]))
+		_apply_event_for(str(inst.get("target", "child")), str(inst["id"]), str(inst.get("policy", "cancel")))
 		var d_money := money - before_money
 		var d_land := land - before_land
 		if d_money != 0 or d_land != 0:
@@ -5518,6 +5595,61 @@ func _apply_event_effects(def: Dictionary) -> void:
 	if txt != "":
 		var bad_news: bool = d_money < 0 or d_health < 0.0 or d_fame < 0.0
 		_toast(txt, Color(0.62, 0.24, 0.18) if bad_news else Color(0.30, 0.42, 0.22))
+
+
+func _actor_is_dead(who: String) -> bool:
+	if who == "child":
+		return ended
+	return bool(parent_dead.get(who, false))
+
+
+func _apply_event_for(who: String, id: String, policy: String) -> void:
+	var target := who
+	if _actor_is_dead(target):
+		if policy == "transfer" and not _actor_is_dead("child"):
+			target = "child"
+			_log_fact("event", "transferred", {"id": id, "from": who, "to": target})
+		else:
+			_log_fact("event", "cancelled_dead_target", {"id": id, "who": who})
+			return
+	if target == pov:
+		_apply_event(id)
+		return
+	_apply_event_to_inactive(target, id)
+
+
+func _apply_event_to_inactive(who: String, id: String) -> void:
+	if not pov_state.has(who):
+		pov_state[who] = {}
+	var st: Dictionary = pov_state[who]
+	var v: Dictionary = actor_vitals.get(who, {"age": 0, "health": 80.0, "lifespan": 60})
+	var def := DB.event_def(id)
+	if def.has("effects"):
+		var eff: Dictionary = def.get("effects", {})
+		var d_money := int(eff.get("money", 0))
+		if d_money != 0:
+			money = maxi(0, money + d_money)
+		var d_hp := float(eff.get("health", 0.0))
+		if d_hp != 0.0:
+			v["health"] = clampf(float(v.get("health", 80.0)) + d_hp, 0.0, 100.0)
+		var d_fame := float(eff.get("fame", 0.0))
+		if d_fame != 0.0:
+			st["fame"] = clampf(float(st.get("fame", 0.0)) + d_fame, 0.0, 100.0)
+		if eff.has("story"):
+			var sd: Dictionary = st.get("story", {})
+			sd[str(eff["story"])] = true
+			st["story"] = sd
+	else:
+		match id:
+			"plague":
+				var med := int(st.get("med_rank", 0))
+				v["health"] = maxf(0.0, float(v.get("health", 80.0)) - (2.0 if med >= 3 else 7.0))
+			"harvest":
+				var land_n := int(st.get("land", 0))
+				money += maxi(300, land_n * 60)
+	actor_vitals[who] = v
+	pov_state[who] = st
+	_log_fact("event", "applied_to_inactive", {"id": id, "who": who})
 
 
 func _apply_event(id: String) -> void:

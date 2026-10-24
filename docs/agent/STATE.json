@@ -11,7 +11,7 @@
     "remote_mutations_performed":  true,
     "current_task":  "M2-01b 事件实例绑定承受者",
     "next_task":  "M2-01b 事件实例绑定承受者",
-    "task_status":  "pr-open-draft",
+    "task_status":  "M2-01b-pushed",
     "branch":  "agent/M1-ci-workflow",
     "base_sha":  "bf0846f1c20cbcf4dd0cf5f5707b0cf1c88e12cb",
     "commit_sha":  "b566a35252a50a240b02000e1e32caff1933fb46",
@@ -21,9 +21,8 @@
     "integrated_sha":  null,
     "blocked_reason":  "仍有限制：只有 Linux CI；数据文件无 schema 校验；无真人试玩。PR 已存在（#1, Draft），不再阻塞。",
     "evidence":  [
-                     "docs/verification/2026-10-24-fixes-1.md",
-                     "docs/verification/2026-10-24-fixes-2.md",
-                     "docs/verification/M2-05b.md"
+                     "docs/verification/M2-01b.md",
+                     "docs/verification/2026-10-24-fixes-2.md"
                  ],
-    "next_step":  "事件实例绑定稳定人物 ID 与死亡后策略（取消/转移），补四条回归"
+    "next_step":  "连续运行与重载续跑的状态对比；随后借米因果链"
 }
