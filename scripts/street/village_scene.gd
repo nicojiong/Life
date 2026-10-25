@@ -3908,6 +3908,33 @@ func _run_verify_smoke() -> void:
 		print("[VERIFY] FAIL stat_caps_unified fame=", sc_fame_cap, "/", sc_fame_floor, " craft=", sc_craft_cap, " medicine=", sc_med_cap, " learning=", sc_learn_cap, " distinct=", sc_differs)
 
 
+	# M3-10：开馆授徒必须能在书院面板里点到，而不是只存在于路线脚本里
+	var ato_keep := learning
+	learning = 60.0
+	var ato_low := false
+	for a in _actions_for("academy"):
+		if str((a as Dictionary).get("label", "")).contains("开馆授徒"):
+			ato_low = true
+	learning = 130.0
+	var ato_high := false
+	for a in _actions_for("academy"):
+		if str((a as Dictionary).get("label", "")).contains("开馆授徒"):
+			ato_high = true
+	var ato_gain_ok := false
+	for a in _actions_for("academy"):
+		if str((a as Dictionary).get("label", "")).contains("开馆授徒"):
+			var g: Dictionary = (a as Dictionary).get("gain", {})
+			ato_gain_ok = int(g.get("money", 0)) >= 1000
+	learning = ato_keep
+	var ato_ok: bool = (not ato_low) and ato_high and ato_gain_ok
+	if ato_ok:
+		oks += 1
+		print("[VERIFY] PASS academy_teaching_option low_hidden=", not ato_low, " high_offered=", ato_high, " money_ok=", ato_gain_ok)
+	else:
+		fails.append("academy_teaching_option")
+		print("[VERIFY] FAIL academy_teaching_option low_hidden=", not ato_low, " high_offered=", ato_high, " money_ok=", ato_gain_ok)
+
+
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
 	var keep_age := age
@@ -6086,6 +6113,10 @@ func _actions_for(id: String) -> Array:
 			acts.append({"label": "拜一位先生（三个月，三千文）", "months": 3, "cost": 3000,
 				"gain": {"learning": 4, "fame": 6}, "flag": "读书",
 				"flavor": "你递了帖子，磕了头。先生说：往后每月来两回。"})
+			if learning >= 120.0:
+				acts.append({"label": "开馆授徒（一年，识字一百二）", "months": 12, "cost": 0,
+					"gain": {"money": 1500, "learning": 2, "fame": 3}, "req": {"learning": 120.0},
+					"flavor": "你在自家堂屋摆了几张矮桌，收了六个蒙童。"})
 			return acts
 		"temple":
 			return [
