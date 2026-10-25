@@ -1493,14 +1493,19 @@ func _route_step(route: String) -> void:
 		return
 	match route:
 		"study":
-			if _is_exam_year() and age >= 15 and age <= 42 and learning >= 25.0 and money >= 800 and not story.has("举人") and not story.has("进士"):
+			var can_exam := _is_exam_year() and age >= 15 and age <= 42 and learning >= 25.0 and not story.has("举人") and not story.has("进士")
+			if can_exam and money >= 800:
 				_on_action({"label": "应解试", "months": 3, "cost": 800, "special": "jieshi", "min_age": 12})
-			elif money < 900:
-				_on_action({"label": "抄书", "months": 1, "gain": {"money": 80, "learning": 1}})
+			elif story.has("举人") and not story.has("进士") and age >= 18 and age <= 45 and learning >= 42.0 and money >= 3000:
+				_on_action({"label": "应省试", "months": 12, "cost": 3000, "special": "shengshi", "min_age": 16})
+			elif money < 800:
+				# 学生也要吃饭：先靠抄书与校书糊口，攒够盘缠再应考
+				if learning >= 30.0:
+					_on_action({"label": "替书院校书", "months": 1, "gain": {"money": 1200, "learning": 4}})
+				else:
+					_on_action({"label": "抄书", "months": 1, "gain": {"money": 400, "learning": 2}})
 			else:
-				_on_action({"label": "读书", "months": 1, "gain": {"learning": 2}})
-				if age % 10 == 0:
-					_log_fact("study", "studied_year", {"age": age})
+				_on_action({"label": "读书", "months": 1, "gain": {"learning": 3}})
 		"craft":
 			if craft_rank == 0:
 				_apply_special("apprentice")
@@ -3557,7 +3562,7 @@ func _run_verify_smoke() -> void:
 	var study_reached: bool = int(r_study["age"]) >= 55
 	var craft_reached: bool = int(r_craft["age"]) >= 55
 	var care_reached: bool = int(r_care["age"]) >= 55
-	var study_mark: bool = bool((r_study["story"] as Dictionary).has("举人")) or bool((r_study["story"] as Dictionary).has("进士")) or float(r_study["learning"]) >= 100.0
+	var study_mark: bool = bool((r_study["story"] as Dictionary).has("举人")) or bool((r_study["story"] as Dictionary).has("进士"))
 	var craft_mark: bool = int(r_craft["craft_rank"]) >= 2 or bool((r_craft["story"] as Dictionary).has("匠户"))
 	var care_mark: bool = bool(r_care["married"]) or int(r_care["children"]) > 0 or bool((r_care["story"] as Dictionary).has("务农"))
 	var facts_ok: bool = int(r_study["facts"]) >= 20 and int(r_craft["facts"]) >= 20 and int(r_care["facts"]) >= 20
@@ -3569,7 +3574,7 @@ func _run_verify_smoke() -> void:
 	var routes_ok: bool = study_reached and craft_reached and care_reached and study_mark and craft_mark and care_mark and facts_ok and routes_differ
 	if routes_ok:
 		oks += 1
-		print("[VERIFY] PASS m3_routes_walkable study=", r_study["age"], "/", r_study["learning"], " craft=", r_craft["age"], "/", r_craft["craft_rank"], " care=", r_care["age"], "/", r_care["married"])
+		print("[VERIFY] PASS m3_routes_walkable study=", r_study["age"], "/", r_study["learning"], " degree=", bool((r_study["story"] as Dictionary).has("举人")) or bool((r_study["story"] as Dictionary).has("进士")), " craft=", r_craft["age"], "/", r_craft["craft_rank"], " care=", r_care["age"], "/", r_care["married"])
 	else:
 		fails.append("m3_routes_walkable")
 		print("[VERIFY] FAIL m3_routes_walkable study=", r_study["age"], " craft=", r_craft["age"], " care=", r_care["age"], " marks=", study_mark, "/", craft_mark, "/", care_mark, " facts=", facts_ok, " differ=", routes_differ, " s=", r_study, " c=", r_craft, " ca=", r_care)

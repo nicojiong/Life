@@ -9,7 +9,7 @@
     "godot_run":  "import_only",
     "game_code_modified":  false,
     "remote_mutations_performed":  true,
-    "current_task":  "M3-04b 档案接入结局页",
+    "current_task":  "M3-07 求学路线打通科举",
     "next_task":  "真人试玩验收（pending_user_acceptance）",
     "task_status":  "ready_for_user_acceptance",
     "branch":  "agent/m2-m3",
@@ -21,10 +21,10 @@
     "integrated_sha":  null,
     "blocked_reason":  "未合并 main、未发布 Release；真人试玩为 pending_user_acceptance。",
     "evidence":  [
-                     "docs/PR_M2M3.md",
-                     "docs/PLAYTEST_M2M3.md",
+                     "docs/verification/M3-07-study-exam.md",
                      "docs/verification/M3-04b-archive-screen.md",
-                     "docs/verification/M3-05b-longrun.md"
+                     "docs/PR_M2M3.md",
+                     "docs/PLAYTEST_M2M3.md"
                  ],
     "next_step":  "用户按 docs/PLAYTEST_M2M3.md 试玩三条路线，重点看两个早年选择例子；有反馈再开 M3 修补",
     "playtest":  {
