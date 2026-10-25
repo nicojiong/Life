@@ -175,6 +175,8 @@ func _arndi(a: int, b: int) -> int:
 ## M1-03b：事实日志。每条记"什么时候、什么类型、由什么引起"，供墓志与调试追溯
 var facts: Array = []
 const FACT_CAP := 240
+## 识字上限：统一走 _add_learning，避免有的路径钳 100、有的路径不钳
+const LEARNING_CAP := 200.0
 var fact_seq := 0
 ## 已被裁剪掉的最大事实 id；比它小的引用算已归档
 var fact_floor := 0
@@ -208,6 +210,10 @@ func _log_fact(kind: String, cause: String, data: Dictionary = {}, cause_fid: in
 		fact_floor = maxi(fact_floor, int(dropped.get("fid", 0)))
 	return fact_seq
 
+
+func _add_learning(v: float) -> void:
+	# 唯一入口：所有识字增长都走这里，上限 LEARNING_CAP
+	learning = clampf(learning + v, 0.0, LEARNING_CAP)
 
 func _fact_chain(fid: int) -> Array:
 	# 从一条事实往回追，最多 16 层，防止脏数据造成死循环
@@ -919,7 +925,7 @@ func _apply_child_event(id: String) -> void:
 	var cold := Color(0.62, 0.24, 0.18)
 	match id:
 		"market_trip":
-			learning = minf(100.0, learning + 1.0)
+			_add_learning(1.0)
 			fame = minf(100.0, fame + 1.0)
 			_toast("父亲把你架在脖子上赶集。你看见那么多人的头，一直看到睡着。", warm)
 		"lullaby":
@@ -947,13 +953,13 @@ func _apply_child_event(id: String) -> void:
 			craft = minf(100.0, craft + 2.0)
 			_toast("父亲把一块边角料塞给你，教你削一把木剑。削了三天，像根柴。", warm)
 		"abacus":
-			learning = minf(100.0, learning + 2.0)
+			_add_learning(2.0)
 			_toast("父亲抱你上柜台，教你拨算盘珠子。你只会听响。", warm)
 		"drill_play":
 			health = minf(100.0, health + 2.0)
 			_toast("父亲教你扎马步，你站不到十个数就倒了，他在旁边笑。", warm)
 		"letters":
-			learning = minf(100.0, learning + 3.0)
+			_add_learning(3.0)
 			_toast("父亲在灯下写字，握着你的手描了一个「人」字。那是你认得的第一字。", warm)
 		"fever":
 			health = maxf(0.0, health - 2.0)
@@ -1293,7 +1299,7 @@ func _replay_digest(seed_value: int) -> String:
 	_on_action(long_act)
 	# 纳入两条随机流的抽取，种子才会体现在摘要里
 	money += _rndi(0, 500)
-	learning += float(_arndi(0, 5))
+	_add_learning(float(_arndi(0, 5)))
 	var parts: Array = [
 		"y%d" % year, "m%d" % month, "a%d" % age, "money%d" % money,
 		"l%.2f" % learning, "c%.2f" % craft, "f%.2f" % fame, "hp%.2f" % health,
@@ -3824,6 +3830,32 @@ func _run_verify_smoke() -> void:
 	else:
 		fails.append("archive_on_screen")
 		print("[VERIFY] FAIL archive_on_screen chapters=", ep_chapter_lines, " sections=", ep_has_sections, " verdict_after=", ep_verdict_after)
+
+
+	# M3-08：识字上限必须一致——过去有的路径钳 100、有的不钳，读书过 100 就白读
+	var lc_keep := learning
+	learning = 0.0
+	_add_learning(150.0)
+	var lc_150: bool = is_equal_approx(learning, 150.0)
+	_add_learning(100.0)
+	var lc_cap: bool = is_equal_approx(learning, 200.0)
+	_apply_gain({"learning": 50})
+	var lc_gain_cap: bool = is_equal_approx(learning, 200.0)
+	learning = 0.0
+	_add_learning(-5.0)
+	var lc_floor: bool = is_equal_approx(learning, 0.0)
+	# 读书在 100 之后仍然有意义
+	learning = 99.0
+	_add_learning(3.0)
+	var lc_still_grows: bool = learning > 100.0
+	learning = lc_keep
+	var lc_ok: bool = lc_150 and lc_cap and lc_gain_cap and lc_floor and lc_still_grows
+	if lc_ok:
+		oks += 1
+		print("[VERIFY] PASS learning_cap_consistent at150=", lc_150, " cap=", lc_cap, " gain_cap=", lc_gain_cap, " floor=", lc_floor, " grows_past_100=", lc_still_grows)
+	else:
+		fails.append("learning_cap_consistent")
+		print("[VERIFY] FAIL learning_cap_consistent at150=", lc_150, " cap=", lc_cap, " gain_cap=", lc_gain_cap, " floor=", lc_floor, " grows_past_100=", lc_still_grows)
 
 
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
@@ -6455,7 +6487,7 @@ func _apply_gain(g: Dictionary) -> void:
 			"money":
 				money = maxi(0, money + int(v))
 			"learning":
-				learning = clampf(learning + v, 0.0, 100.0)
+				_add_learning(v)
 			"craft":
 				craft = clampf(craft + v, 0.0, 100.0)
 			"medicine":
@@ -6685,7 +6717,7 @@ func _apply_special(s: String) -> void:
 		med_rank = 4
 		med_book = true
 		fame = minf(100.0, fame + 18.0)
-		learning = minf(100.0, learning + 5.0)
+		_add_learning(5.0)
 		_play_cutscene("著 书", [
 			"你把三十年看过的方子抄了一遍，删去一半。",
 			"书成那日，弟子们抄了七份，分送州县。",
@@ -7685,7 +7717,7 @@ func _npc_act(who: String, st: Dictionary) -> void:
 				act = "chat"
 		"learn":
 			if learning >= 20.0 or bool(story.get("拜师", false)):
-				learning += 3.0
+				_add_learning(3.0)
 				act = "teach"
 				_toast(_npc_name(who) + "指点了你几句。", Color(0.30, 0.42, 0.22))
 			elif bool(story.get("没听家里的", false)):
