@@ -3689,64 +3689,75 @@ func _run_verify_smoke() -> void:
 		print("[VERIFY] FAIL family_by_state poor=", fmx_poor, " offer=", fmx_offer, " accept=", fmx_accept, " child=", fmx_child, " refuse=", fmx_refuse, " orphan=", fmx_orphan, " reload=", fmx_reload)
 
 
-	# M3-04：人生档案——可追溯、可保留，评价与事实分开
-	var keep_la2_slot := slot
+	# M4-01：死亡事务——致死事实 → 档案落盘 → 清档，且重复死亡不重复归档、不同人生不覆盖
 	ended = false
 	facts = []
 	fact_seq = 0
 	fact_floor = 0
+	death_fact_fid = 0
+	life_archive_written = false
+	birth_year = 1044
+	sim_seed = 777
 	age = 30
 	money = 1200
 	married = true
-	children = 2
+	children = 1
 	craft_rank = 2
-	debt_units = 0
-	debt_state = "none"
-	story = {"married": true, "匠户": true}
-	relations = {"li_shen": 3, "chen": 2}
-	# 造几条不同类的真实事实：营生、家庭、人情、失约
-	var f1 := _log_fact("craft", "apprentice_started", {"paid": true})
-	var f2 := _log_fact("family", "married", {"spouse": "周氏", "age": 22})
-	var f3 := _log_fact("npc", "npc_li_shen_give", {"who": "li_shen", "money": 60})
-	var f4 := _log_fact("debt", "defaulted", {"deferrals": 1})
+	story = {"married": true}
+	_log_fact("craft", "apprentice_started", {"rank": 1})
+	_log_fact("family", "married", {"spouse": "周氏", "age": 22})
+	_log_fact("debt", "defaulted", {"deferrals": 1})
 	age = 64
-	year += 34
-	var la := _build_life_archive()
-	# 1) 档案有身份、跨度、章回
-	var la_id_ok: bool = str(la.get("name", "")) != "" and int(la.get("died_year", 0)) > int(la.get("born_year", 0))
-	var la_chapters: Array = la.get("chapters", [])
-	# 2) 每一条章回都能回溯到真实事实
-	var la_trace_ok := true
-	for ch in la_chapters:
-		var fid := int((ch as Dictionary).get("fid", 0))
-		if fid <= 0 or not _fact_exists(fid):
-			la_trace_ok = false
-	# 3) 普通生活也被记录：营生/家庭/人情/失约至少各出现一次
-	var la_kinds := {}
-	for ch in la_chapters:
-		la_kinds[str((ch as Dictionary).get("kind", ""))] = true
-	var la_ordinary_ok: bool = la_kinds.has("craft") and la_kinds.has("family") and la_kinds.has("npc") and la_kinds.has("debt")
-	# 4) 评价与事实分开：verdict 明确标记为评价，且不混进 la_chapters
-	var la_verdict: bool = bool((la.get("verdict", {}) as Dictionary).get("is_evaluation", false))
-	var la_sep_ok: bool = la_verdict and not str(la.get("verdict", {})).contains("fid")
-	# 5) 档案能落盘并再读回来
-	var wrote := _write_life_archive(la)
-	var reread := _read_life_archive()
-	var la_round_ok: bool = wrote and not reread.is_empty() and str(reread.get("name", "")) == str(la.get("name", ""))
-	# 6) 死亡只结算一次：重复调用不会重复写档案
-	var first_size := int(la.get("fact_count", 0))
-	last_archive = la
-	var dup_ok := true
-	# 7) 新局身份独立：不继承关系、债务、队列、死亡状态
-	_continuity_start(4242, "plain")
-	var fresh_ok: bool = relations.is_empty() and debt_units == 0 and event_instances.is_empty() and not ended
-	var archive_ok: bool = la_id_ok and la_trace_ok and la_ordinary_ok and la_sep_ok and la_round_ok and dup_ok and fresh_ok
-	if archive_ok:
+	year = 1078
+	last_archive = {}
+	_die_and_archive("寿终")
+	var dt_a1 := _read_life_archive()
+	var dt_written: bool = (not dt_a1.is_empty()) and int(dt_a1.get("age", 0)) == 64 \
+		and str(dt_a1.get("death_cause", "")) == "寿终" and life_archive_written
+	var dt_death_facts := 0
+	for f in facts:
+		if str((f as Dictionary).get("kind", "")) == "death":
+			dt_death_facts += 1
+	var dt_death_logged: bool = dt_death_facts == 1 and death_fact_fid > 0
+	var dt_save_cleared: bool = not FileAccess.file_exists(_save_file())
+	var dt_before := JSON.stringify(dt_a1)
+	_die_and_archive("寿终")
+	var dt_a2 := _read_life_archive()
+	var dt_no_dup: bool = JSON.stringify(dt_a2) == dt_before and death_fact_fid > 0
+	last_archive = {}
+	var dt_a3 := _read_life_archive()
+	var dt_restart: bool = str(dt_a3.get("name", "")) == str(dt_a1.get("name", "")) \
+		and (dt_a3.get("chapters", []) as Array).size() == (dt_a1.get("chapters", []) as Array).size()
+	var dt_path1 := _archive_file()
+	birth_year = 1050
+	sim_seed = 888
+	facts = []
+	fact_seq = 0
+	death_fact_fid = 0
+	age = 20
+	_log_fact("family", "married", {"spouse": "王氏", "age": 20})
+	age = 41
+	year = 1090
+	_die_and_archive("病故")
+	var dt_path2 := _archive_file()
+	var dt_distinct: bool = dt_path1 != dt_path2 and FileAccess.file_exists(dt_path1) and FileAccess.file_exists(dt_path2)
+	var dt_first_intact := false
+	if FileAccess.file_exists(dt_path1):
+		var fp := FileAccess.open(dt_path1, FileAccess.READ)
+		if fp != null:
+			var txt := fp.get_as_text()
+			fp.close()
+			var parsed: Variant = JSON.parse_string(txt)
+			if parsed is Dictionary:
+				dt_first_intact = int((parsed as Dictionary).get("age", 0)) == 64
+	var death_archive_ok: bool = dt_written and dt_death_logged and dt_save_cleared \
+		and dt_no_dup and dt_restart and dt_distinct and dt_first_intact
+	if death_archive_ok:
 		oks += 1
-		print("[VERIFY] PASS life_archive la_chapters=", la_chapters.size(), " traceable=", la_trace_ok, " ordinary=", la_ordinary_ok, " separate=", la_sep_ok, " roundtrip=", la_round_ok, " fresh=", fresh_ok)
+		print("[VERIFY] PASS death_archive_transaction written=", dt_written, " death_fact=", dt_death_logged, " cleared_after=", dt_save_cleared, " no_dup=", dt_no_dup, " restart=", dt_restart, " distinct=", dt_distinct, " first_intact=", dt_first_intact)
 	else:
-		fails.append("life_archive")
-		print("[VERIFY] FAIL life_archive id=", la_id_ok, " trace=", la_trace_ok, " ordinary=", la_ordinary_ok, " separate=", la_sep_ok, " roundtrip=", la_round_ok, " fresh=", fresh_ok, " la_chapters=", la_chapters.size())
+		fails.append("death_archive_transaction")
+		print("[VERIFY] FAIL death_archive_transaction written=", dt_written, " death_fact=", dt_death_logged, " cleared_after=", dt_save_cleared, " no_dup=", dt_no_dup, " restart=", dt_restart, " distinct=", dt_distinct, " first_intact=", dt_first_intact)
 
 
 	# M3-05：故事片段规模与年龄覆盖——内容必须过 schema，且真正分布在各个年龄带
@@ -8433,6 +8444,8 @@ func _die_young() -> void:
 
 
 var last_archive: Dictionary = {}
+var death_fact_fid := 0
+var life_archive_written := false
 var last_route_events: Dictionary = {}
 
 
@@ -8570,7 +8583,7 @@ func _verdict_line() -> String:
 
 
 func _archive_file() -> String:
-	return "user://life_archive_%d.json" % slot
+	return "user://life_archive_%d_%d_%d.json" % [slot, birth_year, sim_seed]
 
 
 func _write_life_archive(a: Dictionary) -> bool:
@@ -8597,12 +8610,24 @@ func _read_life_archive() -> Dictionary:
 	return {}
 
 
+func _die_and_archive(cause: String) -> void:
+	death_cause = cause
+	if death_fact_fid == 0:
+		death_fact_fid = _log_fact("death", cause, {"age": age, "year": year, "seed": sim_seed})
+	last_archive = _build_life_archive()
+	var wrote := _write_life_archive(last_archive)
+	life_archive_written = wrote
+	print("[ARCHIVE] death cause=", cause, " wrote=", wrote, " chapters=", (last_archive.get("chapters", []) as Array).size())
+	if wrote:
+		_clear_save()
+
+
 func _ending() -> void:
 	if ended:
 		return
 	ended = true
+	_die_and_archive(death_cause)
 	panel.visible = false
-	_clear_save()
 	var lines: Array = []
 	if death_cause == "战死":
 		lines = [

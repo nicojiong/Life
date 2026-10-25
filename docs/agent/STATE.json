@@ -9,9 +9,9 @@
     "godot_run":  "import_only",
     "game_code_modified":  false,
     "remote_mutations_performed":  true,
-    "current_task":  "M2–M3 候选版收尾",
-    "next_task":  "人工建 PR + 真人试玩验收（pending_user_acceptance）",
-    "task_status":  "ready_for_user_acceptance",
+    "current_task":  "M4-01 死亡档案事务（已修）",
+    "next_task":  "M4-02 旧档缺字段时不得继承脏内存",
+    "task_status":  "engineering_fix_in_progress",
     "branch":  "agent/m2-m3",
     "base_sha":  "bf0846f1c20cbcf4dd0cf5f5707b0cf1c88e12cb",
     "commit_sha":  "c99f91731e4d2ddb75ec33cc68a8410286e36e09",
@@ -19,15 +19,14 @@
     "pr_url":  "https://github.com/nicojiong/Life/pull/1",
     "ci_status":  "green: isolated-smoke + continuity (2136256)",
     "integrated_sha":  null,
-    "blocked_reason":  "候选 PR 需 GitHub 凭据（本机无 gh / token）；真人试玩未做。技术项已完成并过 CI。",
+    "blocked_reason":  "工程补齐与验收修正中：按 8 项审查意见逐条修，未合并 main。",
     "evidence":  [
+                     "docs/verification/M4-01-death-archive.md",
                      "docs/DELIVERY_M2M3.md",
                      "docs/PR_M2M3.md",
-                     "docs/PLAYTEST_M2M3.md",
-                     "docs/verification/M3-16-reachability.md",
-                     "docs/verification/M3-17-marriage-experiment.md"
+                     "docs/PLAYTEST_M2M3.md"
                  ],
-    "next_step":  "打开 compare 链接粘贴 docs/PR_M2M3.md；按 docs/PLAYTEST_M2M3.md 试玩三条路线",
+    "next_step":  "为 schema\u003c21 的旧档补显式默认值，验证干净/脏内存加载一致",
     "playtest":  {
                      "baseline_sha":  "b50abd09f01a5664822f91d8101126ef4d09e89f",
                      "entry":  "playtest.bat（隔离 LifePlaytest） / play.bat（原存档） / tools/playtest_check.ps1（启动自检）",
