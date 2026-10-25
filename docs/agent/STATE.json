@@ -10,8 +10,8 @@
     "game_code_modified":  false,
     "remote_mutations_performed":  true,
     "current_task":  "M2-01 事件定义/实例/校验",
-    "next_task":  "M3-06 试玩入口与路线说明",
-    "task_status":  "M3-05b-longrun-done",
+    "next_task":  "真人试玩验收（pending_user_acceptance）",
+    "task_status":  "ready_for_user_acceptance",
     "branch":  "agent/m2-m3",
     "base_sha":  "bf0846f1c20cbcf4dd0cf5f5707b0cf1c88e12cb",
     "commit_sha":  "07462f38d7b6b852c9bf6bf13cfc28ed232d1d73",
@@ -21,10 +21,11 @@
     "integrated_sha":  null,
     "blocked_reason":  "仍有限制：只有 Linux CI；数据文件无 schema 校验；无真人试玩。PR 已存在（#1, Draft），不再阻塞。",
     "evidence":  [
-                     "docs/verification/M3-05a-fragments.md",
+                     "docs/PR_M2M3.md",
+                     "docs/PLAYTEST_M2M3.md",
                      "docs/verification/M3-05b-longrun.md"
                  ],
-    "next_step":  "更新 playtest 构建与三条体验路线文档，准备候选 PR 说明",
+    "next_step":  "用户按 docs/PLAYTEST_M2M3.md 试玩三条路线，重点看两个早年选择例子；有反馈再开 M3 修补",
     "playtest":  {
                      "baseline_sha":  "b50abd09f01a5664822f91d8101126ef4d09e89f",
                      "entry":  "playtest.bat（独立存档 浮生试玩） / play.bat（原存档 浮生）",

@@ -284,7 +284,7 @@
                                          "同一事件定义可以绑定不同合法人物",
                                          "定义与运行中的事件状态分离，无任意eval"
                                      ],
-                      "status":  "in_progress",
+                      "status":  "candidate",
                       "owner":  null,
                       "evidence":  [
                                        "docs/verification/M2-01a-schema.md"
@@ -310,7 +310,7 @@
                                          "同tick按优先级和稳定ID排序，级联事件有上限与后续处理策略",
                                          "演员死亡/迁移和无候选有可解释结果，不无限循环"
                                      ],
-                      "status":  "in_progress",
+                      "status":  "candidate",
                       "owner":  null,
                       "evidence":  [
                                        "docs/verification/M2-02a-queue.md"
@@ -336,7 +336,7 @@
                                          "每链有接受、拒绝、缺资源和演员失效路径",
                                          "所有长期后果跨存档与年份保持正确"
                                      ],
-                      "status":  "in_progress",
+                      "status":  "candidate",
                       "owner":  null,
                       "evidence":  [
                                        "docs/verification/M2-03a-debt.md",
@@ -364,7 +364,7 @@
                                          "6–12可以争取和拒绝部分安排；12+扩大行动空间",
                                          "不可行动说明理由和替代方案；无出生终身职业锁定"
                                      ],
-                      "status":  "in_progress",
+                      "status":  "candidate",
                       "owner":  null,
                       "evidence":  [
                                        "docs/verification/M2-04a-autonomy.md"
@@ -389,7 +389,7 @@
                                          "玩家能看见成本、承诺和已知信息；未知事实不提前泄漏",
                                          "真实试玩能解释前因后果；记录尚未解决的体验问题"
                                      ],
-                      "status":  "in_progress",
+                      "status":  "candidate",
                       "owner":  null,
                       "evidence":  [
                                        "docs/verification/M2-05a-slice.md"
@@ -415,7 +415,7 @@
                                          "NPC会拒绝且行为可解释；同名不同ID不混淆",
                                          "人物死亡/迁移影响相关事件，回忆引用真实事实"
                                      ],
-                      "status":  "in_progress",
+                      "status":  "candidate",
                       "owner":  null,
                       "evidence":  [
                                        "docs/verification/M3-01a-npc.md",
@@ -442,7 +442,7 @@
                                          "缺文件时断言 events_missing 报错，不静默通过",
                                          "需按状态计算的事件（疫/丰年）保留在代码并注明原因"
                                      ],
-                      "status":  "in_progress",
+                      "status":  "candidate",
                       "owner":  null,
                       "evidence":  [
                                        "docs/verification/M3-01a.md",
@@ -469,7 +469,7 @@
                                          "不读书、改行、晚年补学具有可达路径",
                                          "不同路线至少改变关系网络、机会或生活结构，不只是数值名称"
                                      ],
-                      "status":  "in_progress",
+                      "status":  "candidate",
                       "owner":  null,
                       "evidence":  [
                                        "docs/verification/M3-02a-routes.md",
@@ -496,7 +496,7 @@
                                          "拒绝关系或无子女人生可继续",
                                          "家庭变化依据person状态与时代规则，文案演员正确"
                                      ],
-                      "status":  "in_progress",
+                      "status":  "candidate",
                       "owner":  null,
                       "evidence":  [
                                        "docs/verification/M3-03a-family-state.md"
@@ -522,7 +522,7 @@
                                          "普通生活有具体回望，不以未考进士判定无意义",
                                          "死后不接受活人命令；新局world_id不复用旧局状态"
                                      ],
-                      "status":  "in_progress",
+                      "status":  "candidate",
                       "owner":  null,
                       "evidence":  [
                                        "docs/verification/M3-04a-archive.md"
@@ -548,7 +548,7 @@
                                          "固定种子集合批跑无状态不变量错误，记录样本范围而非声称零bug",
                                          "玩家能辨识人物愿望与自己的两次长期影响"
                                      ],
-                      "status":  "in_progress",
+                      "status":  "candidate",
                       "owner":  null,
                       "evidence":  [
                                        "docs/verification/M3-05a-fragments.md",
