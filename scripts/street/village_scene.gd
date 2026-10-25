@@ -1515,7 +1515,7 @@ func _route_step(route: String) -> void:
 		"study":
 			var can_exam := _is_exam_year() and age >= 15 and age <= 42 and learning >= 25.0 and not story.has("举人") and not story.has("进士")
 			if can_exam and money >= 800:
-				_on_action({"label": "应解试", "months": 3, "cost": 800, "special": "jieshi", "min_age": 12})
+				_on_action({"label": "应解试", "months": 3, "cost": 800, "special": "jieshi", "min_age": 12, "max_age": 42})
 			elif story.has("举人") and not story.has("进士") and age >= 18 and age <= 45 and learning >= 42.0 and money >= 3000:
 				_on_action({"label": "应省试", "months": 12, "cost": 3000, "special": "shengshi", "min_age": 16})
 			elif money < 800:
@@ -4097,6 +4097,57 @@ func _run_verify_smoke() -> void:
 		print("[VERIFY] FAIL age_gate_edges below=", ae_below, " at_min=", ae_at_min, " at_max=", ae_at_max, " above=", ae_above, " event=", ae_ev_gate_ok, " probes=", ae_probe, " probe_ok=", ae_probe_ok)
 
 
+	# M3-15：41 条真实事件的年龄边界（进入/退出）逐条核对
+	var eb_snap := _replay_snapshot()
+	var eb_checked := 0
+	var eb_bad: Array = []
+	for ev in DB.events:
+		var probe: Dictionary = (ev as Dictionary).duplicate(true)
+		probe.erase("cond")
+		var lo := int(probe.get("min_age", 0))
+		var hi := int(probe.get("max_age", 200))
+		eb_checked += 1
+		if lo > 0:
+			age = lo - 1
+			if _event_ok(probe):
+				eb_bad.append("enter:%s:%d" % [str(probe.get("id", "")), lo - 1])
+		age = lo
+		if not _event_ok(probe):
+			eb_bad.append("min_blocked:%s" % str(probe.get("id", "")))
+		age = hi
+		if not _event_ok(probe):
+			eb_bad.append("max_blocked:%s" % str(probe.get("id", "")))
+		if hi < 200:
+			age = hi + 1
+			if _event_ok(probe):
+				eb_bad.append("exit:%s:%d" % [str(probe.get("id", "")), hi + 1])
+	# 动作侧：应解试带 max_age，43 岁必须被挡
+	var eb_action_ok := true
+	age = 43
+	money = 99999
+	learning = 200.0
+	action_cooldown = {}
+	var eb_act := {"label": "应解试（超龄探针）", "months": 3, "cost": 800,
+		"special": "jieshi", "min_age": 12, "max_age": 42}
+	var eb_m0 := money
+	_on_action(eb_act)
+	if money != eb_m0:
+		eb_action_ok = false
+	age = 30
+	action_cooldown = {}
+	_on_action(eb_act)
+	if money >= eb_m0:
+		eb_action_ok = false
+	_replay_restore(eb_snap)
+	var eb_ok: bool = eb_checked >= 30 and eb_bad.is_empty() and eb_action_ok
+	if eb_ok:
+		oks += 1
+		print("[VERIFY] PASS event_age_boundaries events=", eb_checked, " bad=0 action_max_age=", eb_action_ok)
+	else:
+		fails.append("event_age_boundaries")
+		print("[VERIFY] FAIL event_age_boundaries events=", eb_checked, " bad=", eb_bad, " action_max_age=", eb_action_ok)
+
+
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
 	var keep_age := age
@@ -6259,7 +6310,7 @@ func _actions_for(id: String) -> Array:
 			var can_sheng := exam_year and story.has("举人") and not story.has("进士") and learning >= 42.0 and age >= 18 and age <= 45
 			if can_jie:
 				acts.append({"label": "应解试（今年开科，八百文）", "months": 3, "cost": 800,
-					"special": "jieshi", "min_age": 12})
+					"special": "jieshi", "min_age": 12, "max_age": 42})
 			elif can_sheng:
 				acts.append({"label": "应省试（进京，一年，三千文）", "months": 12, "cost": 3000,
 					"special": "shengshi", "min_age": 16})
