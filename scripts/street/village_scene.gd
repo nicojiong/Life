@@ -3935,6 +3935,37 @@ func _run_verify_smoke() -> void:
 		print("[VERIFY] FAIL academy_teaching_option low_hidden=", not ato_low, " high_offered=", ato_high, " money_ok=", ato_gain_ok)
 
 
+	# M3-11：面板能看到 ≠ 真能用——模拟点一次开馆授徒，必须真的推进时间、进钱、进冷却
+	var ck_snap := _replay_snapshot()
+	ended = false
+	age = 30
+	money = 0
+	learning = 130.0
+	action_cooldown = {}
+	var ck_act: Dictionary = {}
+	for a in _actions_for("academy"):
+		if str((a as Dictionary).get("label", "")).contains("开馆授徒"):
+			ck_act = a
+			break
+	var ck_found: bool = not ck_act.is_empty()
+	var ck_before := _month_index()
+	var ck_key := ""
+	if ck_found:
+		ck_key = _action_key(ck_act)
+		_on_action(ck_act)
+	var ck_money_ok: bool = money >= 1500
+	var ck_time_ok: bool = (_month_index() - ck_before) >= 11
+	var ck_cooldown_ok: bool = ck_key != "" and not _cooldown_ready(ck_key)
+	_replay_restore(ck_snap)
+	var ck_ok: bool = ck_found and ck_money_ok and ck_time_ok and ck_cooldown_ok
+	if ck_ok:
+		oks += 1
+		print("[VERIFY] PASS academy_teaching_clickable found=", ck_found, " money=", ck_money_ok, " time=", ck_time_ok, " cooldown=", ck_cooldown_ok)
+	else:
+		fails.append("academy_teaching_clickable")
+		print("[VERIFY] FAIL academy_teaching_clickable found=", ck_found, " money=", ck_money_ok, " time=", ck_time_ok, " cooldown=", ck_cooldown_ok)
+
+
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
 	var keep_age := age
