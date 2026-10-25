@@ -624,7 +624,7 @@ func _load_game() -> bool:
 		story = d["story"]
 	married = bool(d.get("married", false))
 	spouse_name = str(d.get("spouse", spouse_name))
-	children = int(d.get("children", children))
+	children = int(d.get("children", 0))
 	parents_alive = int(d.get("parents_alive", parents_alive))
 	craft_rank = int(d.get("craft_rank", craft_rank))
 	apprentice_hired = int(d.get("apprentice_hired", apprentice_hired))
@@ -688,24 +688,30 @@ func _load_game() -> bool:
 	child_pref = str(d.get("child_pref", child_pref))
 	if d.get("npc_state") is Dictionary:
 		npc_state = d["npc_state"]
+	else:
+		npc_state = {}
 	if d.get("npc_log") is Array:
 		npc_log = d["npc_log"]
-	npc_seq = int(d.get("npc_seq", npc_seq))
+	else:
+		npc_log = []
+	npc_seq = int(d.get("npc_seq", 0))
 	_npc_ensure()
-	apprentice_state = str(d.get("apprentice_state", apprentice_state))
-	master_available = bool(d.get("master_available", master_available))
+	apprentice_state = str(d.get("apprentice_state", "none"))
+	master_available = bool(d.get("master_available", true))
 	if d.get("heirlooms") is Dictionary:
 		heirlooms = d["heirlooms"]
-	family_ill_pending = bool(d.get("family_ill_pending", family_ill_pending))
-	marriage_pending = bool(d.get("marriage_pending", marriage_pending))
-	marriage_refused = bool(d.get("marriage_refused", marriage_refused))
-	marriage_wait_until = int(d.get("marriage_wait_until", marriage_wait_until))
-	ill_who = str(d.get("ill_who", ill_who))
-	debt_units = int(d.get("debt_units", debt_units))
-	debt_due = int(d.get("debt_due", debt_due))
-	debt_state = str(d.get("debt_state", debt_state))
-	debt_deferrals = int(d.get("debt_deferrals", debt_deferrals))
-	debt_due_sid = int(d.get("debt_due_sid", debt_due_sid))
+	else:
+		heirlooms = {HEIRLOOM_HAIRPIN: 1}
+	family_ill_pending = bool(d.get("family_ill_pending", false))
+	marriage_pending = bool(d.get("marriage_pending", false))
+	marriage_refused = bool(d.get("marriage_refused", false))
+	marriage_wait_until = int(d.get("marriage_wait_until", 0))
+	ill_who = str(d.get("ill_who", ""))
+	debt_units = int(d.get("debt_units", 0))
+	debt_due = int(d.get("debt_due", 0))
+	debt_state = str(d.get("debt_state", "none"))
+	debt_deferrals = int(d.get("debt_deferrals", 0))
+	debt_due_sid = int(d.get("debt_due_sid", 0))
 	if d.get("player_build") is Dictionary:
 		player_build = d["player_build"]
 	if d.get("parent_dead") is Dictionary:
@@ -4196,6 +4202,117 @@ func _run_verify_smoke() -> void:
 		fails.append("content_reachability")
 		print("[VERIFY] FAIL content_reachability runs=", cr_runs, " covered=", cr_covered, "/", cr_all.size(), " ratio=", "%.2f" % cr_ratio, " missing=", cr_missing)
 	_continuity_start(4242, "plain")
+
+
+	# M4-02：旧档缺字段时不得继承加载前内存状态（同一份旧档，脏内存与干净内存加载结果必须一致）
+	var lg_dirty_load := {}
+	var lg_clean_load := {}
+	var lg_path := _save_file()
+	# 造一份 schema14 旧档：删掉本轮新增字段
+	var lg_dict: Dictionary = _state_dict()
+	lg_dict["schema"] = 14
+	for k in ["npc_state", "npc_log", "npc_seq", "apprentice_state", "master_available",
+			"heirlooms", "debt_units", "debt_due", "debt_state", "debt_deferrals", "debt_due_sid",
+			"married", "spouse_name", "children", "marriage_pending", "marriage_refused",
+			"marriage_wait_until", "family_ill_pending", "ill_who"]:
+		lg_dict.erase(k)
+	var lg_f := FileAccess.open(lg_path, FileAccess.WRITE)
+	lg_f.store_string(JSON.stringify(lg_dict))
+	lg_f.close()
+	# 第一次：脏内存（各种"上一局残留"）
+	ended = false
+	npc_state = {"li_shen": {"attitude": 99, "goal": "dirty"}}
+	npc_log = [{"who": "dirty"}]
+	npc_seq = 42
+	apprentice_state = "refused"
+	master_available = false
+	heirlooms = {}
+	debt_units = 5
+	debt_due = 7
+	debt_state = "active"
+	debt_deferrals = 2
+	debt_due_sid = 3
+	married = true
+	spouse_name = "脏氏"
+	children = 3
+	marriage_pending = true
+	marriage_refused = true
+	marriage_wait_until = 9
+	family_ill_pending = true
+	ill_who = "father"
+	var lg_ok1 := _load_game()
+	lg_dirty_load = {
+		"npc_dirties": npc_state.size(),
+		"npc_log": (npc_log as Array).size(),
+		"npc_seq": npc_seq,
+		"apprentice": apprentice_state,
+		"master": master_available,
+		"heirloom": int(heirlooms.get(HEIRLOOM_HAIRPIN, 0)),
+		"debt": "%d/%d/%s/%d/%d" % [debt_units, debt_due, debt_state, debt_deferrals, debt_due_sid],
+		"married": married,
+		"spouse": spouse_name,
+		"children": children,
+		"m_pending": marriage_pending,
+		"m_refused": marriage_refused,
+		"m_wait": marriage_wait_until,
+		"ill": family_ill_pending,
+		"ill_who": ill_who,
+	}
+	# 第二次：干净内存
+	ended = false
+	npc_state = {}
+	npc_log = []
+	npc_seq = 0
+	apprentice_state = "none"
+	master_available = true
+	heirlooms = {HEIRLOOM_HAIRPIN: 1}
+	debt_units = 0
+	debt_due = 0
+	debt_state = "none"
+	debt_deferrals = 0
+	debt_due_sid = 0
+	married = false
+	spouse_name = ""
+	children = 0
+	marriage_pending = false
+	marriage_refused = false
+	marriage_wait_until = 0
+	family_ill_pending = false
+	ill_who = ""
+	var lg_ok2 := _load_game()
+	lg_clean_load = {
+		"npc_dirties": npc_state.size(),
+		"npc_log": (npc_log as Array).size(),
+		"npc_seq": npc_seq,
+		"apprentice": apprentice_state,
+		"master": master_available,
+		"heirloom": int(heirlooms.get(HEIRLOOM_HAIRPIN, 0)),
+		"debt": "%d/%d/%s/%d/%d" % [debt_units, debt_due, debt_state, debt_deferrals, debt_due_sid],
+		"married": married,
+		"spouse": spouse_name,
+		"children": children,
+		"m_pending": marriage_pending,
+		"m_refused": marriage_refused,
+		"m_wait": marriage_wait_until,
+		"ill": family_ill_pending,
+		"ill_who": ill_who,
+	}
+	var lg_same: bool = JSON.stringify(lg_dirty_load) == JSON.stringify(lg_clean_load)
+	var lg_defaults_ok: bool = int(lg_dirty_load["debt"].split("/")[0]) == 0 \
+		and int(lg_dirty_load["heirloom"]) == 1 \
+		and str(lg_dirty_load["apprentice"]) == "none" \
+		and bool(lg_dirty_load["master"]) \
+		and not bool(lg_dirty_load["married"]) \
+		and int(lg_dirty_load["children"]) == 0 \
+		and not bool(lg_dirty_load["ill"]) \
+		and int(lg_dirty_load["npc_seq"]) == 0
+	var legacy_load_ok: bool = lg_ok1 and lg_ok2 and lg_same and lg_defaults_ok
+	if legacy_load_ok:
+		oks += 1
+		print("[VERIFY] PASS legacy_defaults dirty=", lg_dirty_load, " clean_same=", lg_same)
+	else:
+		fails.append("legacy_defaults")
+		print("[VERIFY] FAIL legacy_defaults same=", lg_same, " defaults=", lg_defaults_ok, " dirty=", lg_dirty_load, " clean=", lg_clean_load)
 
 
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）

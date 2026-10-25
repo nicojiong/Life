@@ -9,8 +9,8 @@
     "godot_run":  "import_only",
     "game_code_modified":  false,
     "remote_mutations_performed":  true,
-    "current_task":  "M4-01 死亡档案事务（已修）",
-    "next_task":  "M4-02 旧档缺字段时不得继承脏内存",
+    "current_task":  "M4-02 旧档缺字段默认值（已修）",
+    "next_task":  "M4-03 借米延期重排期 / 切视角债务结算",
     "task_status":  "engineering_fix_in_progress",
     "branch":  "agent/m2-m3",
     "base_sha":  "bf0846f1c20cbcf4dd0cf5f5707b0cf1c88e12cb",
@@ -22,9 +22,8 @@
     "blocked_reason":  "工程补齐与验收修正中：按 8 项审查意见逐条修，未合并 main。",
     "evidence":  [
                      "docs/verification/M4-01-death-archive.md",
-                     "docs/DELIVERY_M2M3.md",
-                     "docs/PR_M2M3.md",
-                     "docs/PLAYTEST_M2M3.md"
+                     "docs/verification/M4-02-legacy-defaults.md",
+                     "docs/DELIVERY_M2M3.md"
                  ],
     "next_step":  "为 schema\u003c21 的旧档补显式默认值，验证干净/脏内存加载一致",
     "playtest":  {
@@ -36,7 +35,7 @@
     "candidate_branch":  "agent/m2-m3",
     "ready_for_user_acceptance":  true,
     "human_play":  "pending_user_acceptance",
-    "assertions":  73,
+    "assertions":  74,
     "save_schema":  21,
     "events":  41
 }
