@@ -9,7 +9,7 @@
     "godot_run":  "import_only",
     "game_code_modified":  false,
     "remote_mutations_performed":  true,
-    "current_task":  "M3-06 试玩入口与路线说明",
+    "current_task":  "M3-04b 档案接入结局页",
     "next_task":  "真人试玩验收（pending_user_acceptance）",
     "task_status":  "ready_for_user_acceptance",
     "branch":  "agent/m2-m3",
@@ -35,7 +35,7 @@
     "candidate_branch":  "agent/m2-m3",
     "ready_for_user_acceptance":  true,
     "human_play":  "pending_user_acceptance",
-    "assertions":  63,
+    "assertions":  64,
     "save_schema":  21,
     "events":  41
 }

@@ -3785,6 +3785,42 @@ func _run_verify_smoke() -> void:
 	_continuity_start(4242, "plain")
 
 
+	# M3-04b：档案要能"在游戏里看到"——结局页必须出现章回与评价
+	ended = false
+	facts = []
+	fact_seq = 0
+	fact_floor = 0
+	age = 28
+	married = true
+	children = 1
+	craft_rank = 2
+	_log_fact("craft", "apprentice_started", {"rank": 1})
+	_log_fact("craft", "journeyman", {"rank": 2})
+	_log_fact("family", "married", {"spouse": "周氏", "age": 22})
+	_log_fact("debt", "defaulted", {"deferrals": 1})
+	age = 60
+	last_archive = _build_life_archive()
+	var ep: Array = _epitaph()
+	var ep_text := "\n".join(PackedStringArray(ep))
+	var ep_has_sections: bool = ep_text.contains("一生章回") and ep_text.contains("后人评")
+	var ep_chapter_lines := 0
+	for ln in ep:
+		if str(ln).contains("岁，") and not str(ln).contains("——"):
+			ep_chapter_lines += 1
+	var ep_has_chapters: bool = ep_chapter_lines >= 3
+	# 评价不能混进章回段：verdict 只出现在"后人评"之后
+	var verdict_pos := ep_text.find("后人评")
+	var verdict_line := str((last_archive.get("verdict", {}) as Dictionary).get("line", ""))
+	var ep_verdict_after: bool = verdict_pos >= 0 and verdict_line != "" and ep_text.find(verdict_line) > verdict_pos
+	var ep_ok: bool = ep_has_sections and ep_has_chapters and ep_verdict_after
+	if ep_ok:
+		oks += 1
+		print("[VERIFY] PASS archive_on_screen chapters=", ep_chapter_lines, " sections=", ep_has_sections, " verdict_after=", ep_verdict_after)
+	else:
+		fails.append("archive_on_screen")
+		print("[VERIFY] FAIL archive_on_screen chapters=", ep_chapter_lines, " sections=", ep_has_sections, " verdict_after=", ep_verdict_after)
+
+
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
 	var keep_age := age
@@ -8476,6 +8512,23 @@ func _epitaph() -> Array:
 		lines.append("卒年%s，遗钱%s。" % [_cn(age), _money_text()])
 	if tier >= 3:
 		lines.append("里中无人为立传。")
+	# M3-04b：把人生档案接到结局界面——章回可读，评价单独成段
+	var arch := last_archive
+	if arch.is_empty():
+		arch = _build_life_archive()
+	var chapters_on_screen: Array = arch.get("chapters", [])
+	if chapters_on_screen.size() > 0:
+		lines.append("—— 一生章回 ——")
+		var shown := 0
+		for ch in chapters_on_screen:
+			if shown >= 6:
+				break
+			lines.append("%s岁，%s。" % [DB.cn(int((ch as Dictionary).get("age", 0))), str((ch as Dictionary).get("text", ""))])
+			shown += 1
+	var verdict_on_screen: Dictionary = arch.get("verdict", {})
+	if not verdict_on_screen.is_empty():
+		lines.append("—— 后人评 ——")
+		lines.append(str(verdict_on_screen.get("line", "")))
 	return lines
 
 
