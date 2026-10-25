@@ -17,7 +17,7 @@ param(
     [string]$GodotPath = $env:LIFE_GODOT,
     [switch]$KeepTemp,
     [int]$TimeoutSeconds = 180,
-    [int]$ExpectedAssertions = 70,
+    [int]$ExpectedAssertions = 71,
     [string]$ArtifactDir = ''
 )
 

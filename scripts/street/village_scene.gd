@@ -4043,6 +4043,60 @@ func _run_verify_smoke() -> void:
 		print("[VERIFY] FAIL min_age_gate blocked_at10=", ag_blocked, " allowed_at20=", ag_allowed)
 
 
+	# M3-14：动作与事件共用同一套年龄判定，且边界（等于 min/max）必须算进去
+	var ae_keep := age
+	age = 15
+	var ae_below: bool = not _age_ok(16, 0)
+	age = 16
+	var ae_at_min: bool = _age_ok(16, 0)
+	age = 6
+	var ae_at_max: bool = _age_ok(1, 6)
+	age = 7
+	var ae_above: bool = not _age_ok(1, 6)
+	# 事件侧同一条 helper
+	var ae_ev_gate_ok := true
+	age = 4
+	if _event_ok({"id": "t", "min_age": 5, "max_age": 7}):
+		ae_ev_gate_ok = false
+	age = 5
+	if not _event_ok({"id": "t", "min_age": 5, "max_age": 7}):
+		ae_ev_gate_ok = false
+	age = 7
+	if not _event_ok({"id": "t", "min_age": 5, "max_age": 7}):
+		ae_ev_gate_ok = false
+	age = 8
+	if _event_ok({"id": "t", "min_age": 5, "max_age": 7}):
+		ae_ev_gate_ok = false
+	# 动作侧：带 min_age 的动作，低于门槛必须被挡（用合成动作，避免依赖开科年等条件）
+	var ae_probe := 0
+	var ae_probe_ok := true
+	var ae_snap := _replay_snapshot()
+	for lo in [12, 15, 16, 18]:
+		ae_probe += 1
+		var probe_act := {"label": "年龄探针", "months": 1, "gain": {"money": 10}, "min_age": int(lo)}
+		age = int(lo) - 1
+		money = 0
+		learning = 200.0
+		action_cooldown = {}
+		_on_action(probe_act)
+		if money != 0:
+			ae_probe_ok = false
+		age = int(lo)
+		action_cooldown = {}
+		_on_action(probe_act)
+		if money < 10:
+			ae_probe_ok = false
+	_replay_restore(ae_snap)
+	age = ae_keep
+	var ae_ok: bool = ae_below and ae_at_min and ae_at_max and ae_above and ae_ev_gate_ok and ae_probe_ok and ae_probe >= 3
+	if ae_ok:
+		oks += 1
+		print("[VERIFY] PASS age_gate_edges below=", ae_below, " at_min=", ae_at_min, " at_max=", ae_at_max, " above=", ae_above, " event=", ae_ev_gate_ok, " probes=", ae_probe, " probe_ok=", ae_probe_ok)
+	else:
+		fails.append("age_gate_edges")
+		print("[VERIFY] FAIL age_gate_edges below=", ae_below, " at_min=", ae_at_min, " at_max=", ae_at_max, " above=", ae_above, " event=", ae_ev_gate_ok, " probes=", ae_probe, " probe_ok=", ae_probe_ok)
+
+
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
 	var keep_age := age
@@ -6608,6 +6662,14 @@ func _cooldown_commit(label: String, months: int) -> void:
 	action_cooldown[label] = _month_index() + maxi(1, months)
 
 
+func _age_ok(lo: int, hi: int) -> bool:
+	# M3-14：动作与事件共用同一套年龄判定；hi<=0 表示没有上限
+	if age < lo:
+		return false
+	if hi > 0 and age > hi:
+		return false
+	return true
+
 func _on_action(act: Dictionary) -> void:
 	if ended:
 		return
@@ -6616,7 +6678,7 @@ func _on_action(act: Dictionary) -> void:
 		_toast("钱不够。", Color(0.62, 0.24, 0.18))
 		return
 	# M3-13：年纪门槛必须在执行层把住，不能只靠 UI 不显示按钮
-	if act.has("min_age") and age < int(act["min_age"]):
+	if act.has("min_age") and not _age_ok(int(act["min_age"]), int(act.get("max_age", 0))):
 		_toast("还不到年纪。", Color(0.62, 0.24, 0.18))
 		return
 	if act.has("req"):
@@ -7312,9 +7374,7 @@ func _on_new_year() -> void:
 # ---------------------------------------------------------------- 结局
 
 func _event_ok(ev: Dictionary) -> bool:
-	if age < int(ev.get("min_age", 0)):
-		return false
-	if age > int(ev.get("max_age", 200)):
+	if not _age_ok(int(ev.get("min_age", 0)), int(ev.get("max_age", 200))):
 		return false
 	match str(ev.get("cond", "")):
 		"farm":
