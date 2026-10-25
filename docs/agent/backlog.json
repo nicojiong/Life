@@ -551,7 +551,8 @@
                       "status":  "in_progress",
                       "owner":  null,
                       "evidence":  [
-                                       "docs/verification/M3-05a-fragments.md"
+                                       "docs/verification/M3-05a-fragments.md",
+                                       "docs/verification/M3-05b-longrun.md"
                                    ],
                       "commit_sha":  null,
                       "remote_sha":  null,

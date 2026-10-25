@@ -191,9 +191,20 @@ func _log_fact(kind: String, cause: String, data: Dictionary = {}, cause_fid: in
 	# M2-03：每条事实有自增 fid，并可选地指向造成它的上一条事实（cause_fid）
 	fact_seq += 1
 	facts.append({"fid": fact_seq, "t": _month_index(), "kind": kind, "cause": cause, "data": data, "cause_fid": cause_fid})
-	# 裁剪时记下被丢掉的最大 fid，这样旧引用是"已归档"而不是"悬空"
+	# 裁剪时优先丢噪音（年关边界、派生后果），保住营生/家庭/人情/债务/科举这些能写进档案的事实
+	# 这样早期人生不会被 240 条上限挤掉
 	while facts.size() > FACT_CAP:
-		var dropped: Dictionary = facts.pop_front()
+		var drop_i := -1
+		for i in range(facts.size()):
+			var fk := str((facts[i] as Dictionary).get("kind", ""))
+			if fk == "year" or fk == "consequence":
+				drop_i = i
+				break
+		if drop_i < 0:
+			drop_i = 0
+		var dropped: Dictionary = facts[drop_i]
+		facts.remove_at(drop_i)
+		fact_floor = maxi(fact_floor, int(dropped.get("fid", 0)))
 		fact_floor = maxi(fact_floor, int(dropped.get("fid", 0)))
 	return fact_seq
 
@@ -1488,18 +1499,26 @@ func _route_step(route: String) -> void:
 				_on_action({"label": "抄书", "months": 1, "gain": {"money": 80, "learning": 1}})
 			else:
 				_on_action({"label": "读书", "months": 1, "gain": {"learning": 2}})
+				if age % 10 == 0:
+					_log_fact("study", "studied_year", {"age": age})
 		"craft":
 			if craft_rank == 0:
 				_apply_special("apprentice")
+				_log_fact("craft", "apprentice_started", {"rank": 1})
 			elif craft_rank == 1 and age >= 18 and craft >= 24.0:
 				_apply_special("journeyman")
+				_log_fact("craft", "journeyman", {"rank": 2})
 			else:
 				_on_action({"label": "做木工", "months": 1, "gain": {"craft": 2, "money": 25}})
+				if age % 10 == 0:
+					_log_fact("craft", "worked_wood", {"age": age})
 		"care":
 			if not married and age >= 20:
 				_route_marry()
 			else:
 				_on_action({"label": "种田", "months": 1, "gain": {"money": 25, "health": 1}, "flag": "务农"})
+				if age % 10 == 0:
+					_log_fact("farm", "worked_field", {"age": age})
 
 
 func _route_marry() -> void:
@@ -3728,6 +3747,42 @@ func _run_verify_smoke() -> void:
 	else:
 		fails.append("story_fragments")
 		print("[VERIFY] FAIL story_fragments count=", frags.size(), " bands=", frag_bands, " schema=", frag_schema_ok, " text=", frag_text)
+
+
+	# M3-05b：固定种子集合的长期模拟——多种子 × 三条路线，记录覆盖与异常
+	var lr_seeds := [20261024, 4242]
+	var lr_routes := ["study", "craft", "care"]
+	var lr_runs := 0
+	var lr_min_age := 999
+	var lr_max_age := 0
+	var lr_min_facts := 999999
+	var lr_anomalies: Array = []
+	for sd in lr_seeds:
+		for rt in lr_routes:
+			var rr := _route_run(str(rt), int(sd))
+			lr_runs += 1
+			var a := int(rr["age"])
+			var fc := int(rr["facts"])
+			lr_min_age = mini(lr_min_age, a)
+			lr_max_age = maxi(lr_max_age, a)
+			lr_min_facts = mini(lr_min_facts, fc)
+			if a < 45:
+				lr_anomalies.append("short_life:%s:%d:%d" % [str(rt), int(sd), a])
+			if fc < 20:
+				lr_anomalies.append("few_facts:%s:%d" % [str(rt), int(sd)])
+			if int(rr["money"]) < 0:
+				lr_anomalies.append("negative_money:%s:%d" % [str(rt), int(sd)])
+			var arch := _build_life_archive()
+			if (arch.get("chapters", []) as Array).size() < 3:
+				lr_anomalies.append("thin_archive:%s:%d" % [str(rt), int(sd)])
+	var long_ok: bool = lr_runs == 6 and lr_anomalies.is_empty() and lr_min_facts >= 20
+	if long_ok:
+		oks += 1
+		print("[VERIFY] PASS long_run_seeds runs=", lr_runs, " age=", lr_min_age, "-", lr_max_age, " min_facts=", lr_min_facts)
+	else:
+		fails.append("long_run_seeds")
+		print("[VERIFY] FAIL long_run_seeds runs=", lr_runs, " age=", lr_min_age, "-", lr_max_age, " min_facts=", lr_min_facts, " anomalies=", lr_anomalies)
+	_continuity_start(4242, "plain")
 
 
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
@@ -8013,6 +8068,10 @@ func _archive_line(f: Dictionary) -> String:
 					return "欠着米没还"
 				_:
 					return "和米债有关"
+		"farm":
+			return "种田的一年"
+		"study":
+			return "读书的一年"
 		"exam":
 			if cause == "jieshi_pass":
 				return "解试中"
