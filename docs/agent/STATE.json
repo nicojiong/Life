@@ -23,6 +23,7 @@
     "evidence":  [
                      "docs/PR_M2M3.md",
                      "docs/PLAYTEST_M2M3.md",
+                     "docs/verification/M3-04b-archive-screen.md",
                      "docs/verification/M3-05b-longrun.md"
                  ],
     "next_step":  "用户按 docs/PLAYTEST_M2M3.md 试玩三条路线，重点看两个早年选择例子；有反馈再开 M3 修补",
