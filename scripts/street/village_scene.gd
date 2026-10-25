@@ -4315,6 +4315,94 @@ func _run_verify_smoke() -> void:
 		print("[VERIFY] FAIL legacy_defaults same=", lg_same, " defaults=", lg_defaults_ok, " dirty=", lg_dirty_load, " clean=", lg_clean_load)
 
 
+	# M4-03：借米延期要重新排期；切到父亲视角时孩子的到期债务也必须真的结算
+	var dd_keep_money := money
+	var dd_keep_state := debt_state
+	var dd_keep_units := debt_units
+	var dd_keep_due := debt_due
+	var dd_keep_sid := debt_due_sid
+	var dd_keep_defer := debt_deferrals
+	var dd_keep_pov := pov
+	var dd_keep_inst := (event_instances as Array).duplicate(true)
+	var dd_keep_facts: Array = (facts as Array).duplicate(true)
+	var dd_keep_story: Dictionary = (story as Dictionary).duplicate(true)
+	var dd_keep_rel: Dictionary = (relations as Dictionary).duplicate(true)
+	# A) 延期后必须还有一条未触发的 debt_due，且到期月等于新的 debt_due
+	ended = false
+	event_instances = []
+	debt_state = "none"
+	debt_units = 0
+	debt_due = 0
+	debt_due_sid = 0
+	debt_deferrals = 0
+	money = 2000
+	_borrow_rice(2)
+	var dd_sid1 := debt_due_sid
+	var dd_due1 := debt_due
+	_defer_debt()
+	var dd_sid2 := debt_due_sid
+	var dd_due2 := debt_due
+	var dd_pending := 0
+	var dd_pending_due := -1
+	for inst in event_instances:
+		var it: Dictionary = inst
+		if str(it.get("id", "")) == "debt_due" and not bool(it.get("fired", false)):
+			dd_pending += 1
+			dd_pending_due = int(it.get("due", -1))
+	var dd_rearmed: bool = dd_sid2 != 0 and dd_sid2 != dd_sid1 and dd_pending >= 1 \
+		and dd_pending_due == dd_due2 and dd_due2 > dd_due1
+	# B) 推进到新到期日：必须真的结算（还清或赖账），不能静默消费
+	var dd_target := dd_due2
+	while _month_index() < dd_target and not ended:
+		_advance_months(1)
+	var dd_settled: bool = str(debt_state) != "borrowed"
+	var dd_fact := false
+	for f in facts:
+		var fd: Dictionary = f
+		if str(fd.get("kind", "")) == "debt":
+			var c2 := str(fd.get("cause", ""))
+			if c2 == "repaid" or c2 == "defaulted":
+				dd_fact = true
+	# C) 切到父亲视角后到期：同样必须结算
+	event_instances = []
+	debt_state = "none"
+	debt_units = 0
+	debt_due = 0
+	debt_due_sid = 0
+	debt_deferrals = 0
+	money = 2000
+	if pov != "child":
+		_switch_pov("child")
+	_borrow_rice(2)
+	var dd_pov_due := debt_due
+	_switch_pov("father")
+	while _month_index() < dd_pov_due and not ended:
+		_advance_months(1)
+	var dd_pov_settled: bool = str(debt_state) != "borrowed"
+	_switch_pov("child")
+	# 还原
+	event_instances = dd_keep_inst
+	debt_state = dd_keep_state
+	debt_units = dd_keep_units
+	debt_due = dd_keep_due
+	debt_due_sid = dd_keep_sid
+	debt_deferrals = dd_keep_defer
+	money = dd_keep_money
+	facts = dd_keep_facts
+	fact_seq = dd_keep_facts.size()
+	story = dd_keep_story
+	relations = dd_keep_rel
+	if pov != dd_keep_pov:
+		_switch_pov(str(dd_keep_pov))
+	var debt_rearm_ok: bool = dd_rearmed and dd_settled and dd_fact and dd_pov_settled
+	if debt_rearm_ok:
+		oks += 1
+		print("[VERIFY] PASS debt_defer_rearm sid=", dd_sid1, "->", dd_sid2, " due=", dd_due1, "->", dd_due2, " settled=", dd_settled, " fact=", dd_fact, " pov_settled=", dd_pov_settled)
+	else:
+		fails.append("debt_defer_rearm")
+		print("[VERIFY] FAIL debt_defer_rearm rearmed=", dd_rearmed, " sid=", dd_sid1, "->", dd_sid2, " due=", dd_due1, "->", dd_due2, " settled=", dd_settled, " fact=", dd_fact, " pov_settled=", dd_pov_settled)
+
+
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
 	var keep_age := age
@@ -7794,6 +7882,8 @@ func _defer_debt() -> String:
 	_cancel_event(debt_due_sid, "debt_deferred")
 	# 延期从原到期日顺延，而不是从现在重新算
 	debt_due = maxi(_month_index() + 1, debt_due + 3)
+	# M4-03：取消旧事件后必须按新到期日重新排期，否则这笔债永远不再到期
+	debt_due_sid = _enqueue_event("debt_due", "debt", debt_due, 0, "child", "cancel", "debt", debt_due)
 	relations[DEBT_CREDITOR] = int(relations.get(DEBT_CREDITOR, 0)) - 1
 	_log_fact("debt", "deferred", {"deferrals": debt_deferrals, "due": debt_due})
 	_toast("孙四皱着眉，还是给了你三个月。", Color(0.62, 0.24, 0.18))
@@ -8484,6 +8574,11 @@ func _kin_death_pass() -> void:
 
 
 func _apply_event_to_inactive(who: String, id: String) -> void:
+	# M4-03：家庭级事件（借米到期）不看视角，必须真的结算
+	if id == "debt_due":
+		_debt_settle_due()
+		_check_actor_deaths()
+		return
 	if not pov_state.has(who):
 		pov_state[who] = {}
 	var st: Dictionary = pov_state[who]
