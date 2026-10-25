@@ -211,6 +211,20 @@ func _log_fact(kind: String, cause: String, data: Dictionary = {}, cause_fid: in
 	return fact_seq
 
 
+const SKILL_CAP := 100.0
+
+
+func _add_fame(v: float) -> void:
+	fame = clampf(fame + v, 0.0, SKILL_CAP)
+
+
+func _add_craft(v: float) -> void:
+	craft = clampf(craft + v, 0.0, SKILL_CAP)
+
+
+func _add_medicine(v: float) -> void:
+	medicine = clampf(medicine + v, 0.0, SKILL_CAP)
+
 func _add_learning(v: float) -> void:
 	# 唯一入口：所有识字增长都走这里，上限 LEARNING_CAP
 	learning = clampf(learning + v, 0.0, LEARNING_CAP)
@@ -926,16 +940,16 @@ func _apply_child_event(id: String) -> void:
 	match id:
 		"market_trip":
 			_add_learning(1.0)
-			fame = minf(100.0, fame + 1.0)
+			_add_fame(1.0)
 			_toast("父亲把你架在脖子上赶集。你看见那么多人的头，一直看到睡着。", warm)
 		"lullaby":
 			health = minf(100.0, health + 1.0)
 			_toast("夜里睡不着，母亲哼了一支不成调的歌。你听着听着就沉下去了。", warm)
 		"needle":
-			craft = minf(100.0, craft + 1.0)
+			_add_craft(1.0)
 			_toast("母亲握着你的手教针脚，你扎了三回，她没松开。", warm)
 		"scold":
-			fame = minf(100.0, fame + 1.0)
+			_add_fame(1.0)
 			health = maxf(0.0, health - 1.0)
 			_toast("你打碎了碗。母亲罚你跪了半个时辰，跪完又给你留了饭。", cold)
 		"sick_mother":
@@ -947,10 +961,10 @@ func _apply_child_event(id: String) -> void:
 			story["当镯"] = true
 			_toast("家里揭不开锅。母亲把陪嫁的银镯子当了，回来时手是空的。", cold)
 		"drunk_cry":
-			fame = minf(100.0, fame + 1.0)
+			_add_fame(1.0)
 			_toast("父亲喝多了，抱着你哭，反复说他对不起这个家。你不知该怎么应。", cold)
 		"wood":
-			craft = minf(100.0, craft + 2.0)
+			_add_craft(2.0)
 			_toast("父亲把一块边角料塞给你，教你削一把木剑。削了三天，像根柴。", warm)
 		"abacus":
 			_add_learning(2.0)
@@ -966,7 +980,7 @@ func _apply_child_event(id: String) -> void:
 			story["病过"] = true
 			_toast("你发高热，母亲用凉水给你擦了一夜。天亮时她眼里全是血丝。", cold)
 		"bully":
-			fame = maxf(0.0, fame - 1.0)
+			_add_fame(-(1.0))
 			_toast("邻家孩子抢了你的东西，你哭着回家。父亲说：下回自己抢回来。", cold)
 		"grandma":
 			health = minf(100.0, health + 1.0)
@@ -1506,7 +1520,9 @@ func _route_step(route: String) -> void:
 				_on_action({"label": "应省试", "months": 12, "cost": 3000, "special": "shengshi", "min_age": 16})
 			elif money < 800:
 				# 学生也要吃饭：先靠抄书与校书糊口，攒够盘缠再应考
-				if learning >= 30.0:
+				if learning >= 120.0:
+					_on_action({"label": "开馆授徒", "months": 1, "gain": {"money": 1500, "learning": 2, "fame": 3}})
+				elif learning >= 30.0:
 					_on_action({"label": "替书院校书", "months": 1, "gain": {"money": 1200, "learning": 4}})
 				else:
 					_on_action({"label": "抄书", "months": 1, "gain": {"money": 400, "learning": 2}})
@@ -3856,6 +3872,40 @@ func _run_verify_smoke() -> void:
 	else:
 		fails.append("learning_cap_consistent")
 		print("[VERIFY] FAIL learning_cap_consistent at150=", lc_150, " cap=", lc_cap, " gain_cap=", lc_gain_cap, " floor=", lc_floor, " grows_past_100=", lc_still_grows)
+
+
+	# M3-09：名望/手艺/医术也必须只有一套写法与一个上限（100），识字则是 200
+	var sc_fame := fame
+	var sc_craft := craft
+	var sc_med := medicine
+	var sc_learn := learning
+	fame = 99.0
+	_add_fame(5.0)
+	var sc_fame_cap: bool = is_equal_approx(fame, 100.0)
+	fame = 0.0
+	_add_fame(-5.0)
+	var sc_fame_floor: bool = is_equal_approx(fame, 0.0)
+	craft = 95.0
+	_add_craft(10.0)
+	var sc_craft_cap: bool = is_equal_approx(craft, 100.0)
+	medicine = 100.0
+	_add_medicine(5.0)
+	var sc_med_cap: bool = is_equal_approx(medicine, 100.0)
+	learning = 199.0
+	_add_learning(5.0)
+	var sc_learn_cap: bool = is_equal_approx(learning, 200.0)
+	var sc_differs: bool = not is_equal_approx(float(SKILL_CAP), float(LEARNING_CAP))
+	fame = sc_fame
+	craft = sc_craft
+	medicine = sc_med
+	learning = sc_learn
+	var sc_ok: bool = sc_fame_cap and sc_fame_floor and sc_craft_cap and sc_med_cap and sc_learn_cap and sc_differs
+	if sc_ok:
+		oks += 1
+		print("[VERIFY] PASS stat_caps_unified fame=", sc_fame_cap, "/", sc_fame_floor, " craft=", sc_craft_cap, " medicine=", sc_med_cap, " learning=", sc_learn_cap, " distinct=", sc_differs)
+	else:
+		fails.append("stat_caps_unified")
+		print("[VERIFY] FAIL stat_caps_unified fame=", sc_fame_cap, "/", sc_fame_floor, " craft=", sc_craft_cap, " medicine=", sc_med_cap, " learning=", sc_learn_cap, " distinct=", sc_differs)
 
 
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
@@ -6489,11 +6539,11 @@ func _apply_gain(g: Dictionary) -> void:
 			"learning":
 				_add_learning(v)
 			"craft":
-				craft = clampf(craft + v, 0.0, 100.0)
+				_add_craft(v)
 			"medicine":
-				medicine = clampf(medicine + v, 0.0, 100.0)
+				_add_medicine(v)
 			"fame":
-				fame = clampf(fame + v, 0.0, 100.0)
+				_add_fame(v)
 			"health":
 				health = clampf(health + v, 0.0, 100.0)
 
@@ -6556,14 +6606,14 @@ func _apply_special(s: String) -> void:
 		story["利滚利"] = true
 	elif s == "apprentice":
 		craft_rank = 1
-		craft = minf(100.0, craft + 6.0)
-		fame = minf(100.0, fame + 2.0)
+		_add_craft(6.0)
+		_add_fame(2.0)
 		story["匠户"] = true
 		_leave_old_line("craft")
 		_toast("你磕了头，端了拜师茶。师父说：先学三年看火。", Color(0.30, 0.26, 0.21))
 	elif s == "journeyman":
 		craft_rank = 2
-		fame = minf(100.0, fame + 8.0)
+		_add_fame(8.0)
 		_play_cutscene("出 师", [
 			"师父把一套凿子推到你面前，说：拿去吧。",
 			"「以后接活，报我的名字也行，报你自己的也行。」",
@@ -6571,12 +6621,12 @@ func _apply_special(s: String) -> void:
 		], false)
 	elif s == "take_apprentice":
 		apprentice_hired += 1
-		fame = minf(100.0, fame + 6.0)
+		_add_fame(6.0)
 		_toast("收了个徒弟，管饭，不给工钱。", Color(0.30, 0.26, 0.21))
 	elif s == "workshop":
 		workshop_open = true
 		craft_rank = 3
-		fame = minf(100.0, fame + 10.0)
+		_add_fame(10.0)
 		_rebuild()
 		_play_cutscene("开 作 坊", [
 			"你在村口盘下两间铺面，挂了「营造」的幌子。",
@@ -6602,11 +6652,11 @@ func _apply_special(s: String) -> void:
 	elif s == "w_start":
 		women_rank = 1
 		money += 300
-		craft = minf(100.0, craft + 2.0)
+		_add_craft(2.0)
 		_toast("接下了第一份浆洗。手在冷水里泡了三个月，指节都肿了。", Color(0.30, 0.26, 0.21))
 	elif s == "w_journey":
 		women_rank = 2
-		fame = minf(100.0, fame + 5.0)
+		_add_fame(5.0)
 		_play_cutscene("绣 娘", [
 			"你绣的一方帕子被布庄的掌柜看中了。",
 			"他说：往后有多少，我收多少。",
@@ -6614,14 +6664,14 @@ func _apply_special(s: String) -> void:
 		], false)
 	elif s == "w_midwife":
 		if _arnd() < 0.85:
-			fame = minf(100.0, fame + 5.0)
+			_add_fame(5.0)
 			_toast("母子平安。主家给你包了红纸，还提了一篮鸡蛋。", Color(0.30, 0.42, 0.22))
 		else:
-			fame = maxf(0.0, fame - 6.0)
+			_add_fame(-(6.0))
 			_toast("孩子没保住。你在门外站了很久，从此不太敢接生。", Color(0.62, 0.24, 0.18))
 	elif s == "w_shop":
 		women_rank = 3
-		fame = minf(100.0, fame + 10.0)
+		_add_fame(10.0)
 		_play_cutscene("绣 坊", [
 			"你在巷口租了两间屋，摆了六张绣架。",
 			"姑娘们低头穿针，屋里只有线过布的声音。",
@@ -6629,7 +6679,7 @@ func _apply_special(s: String) -> void:
 		], false)
 	elif s == "w_guild":
 		women_rank = 4
-		fame = minf(100.0, fame + 12.0)
+		_add_fame(12.0)
 		_play_cutscene("行 首", [
 			"女红行的老人们推你坐了首座。",
 			"从今往后，县里绣活的价钱由你们几家议定。",
@@ -6638,7 +6688,7 @@ func _apply_special(s: String) -> void:
 	elif s == "stall":
 		var earn := 300 + _arndi(0, 600)
 		money += earn
-		fame = minf(100.0, fame + 1.0)
+		_add_fame(1.0)
 		if trade_rank == 0:
 			trade_rank = 1
 			_leave_old_line("trade")
@@ -6657,7 +6707,7 @@ func _apply_special(s: String) -> void:
 	elif s == "sedentary":
 		trade_rank = 2
 		shop_level += 1
-		fame = minf(100.0, fame + 10.0)
+		_add_fame(10.0)
 		_play_cutscene("坐 贾", [
 			"你把铺面的招牌换成了漆的。",
 			"从此不再挑担子跑路，只在柜台后头等人上门。",
@@ -6666,7 +6716,7 @@ func _apply_special(s: String) -> void:
 	elif s == "guild":
 		trade_rank = 3
 		guild_open = true
-		fame = minf(100.0, fame + 20.0)
+		_add_fame(20.0)
 		_play_cutscene("入 行 会", [
 			"行会的老先生把一本册子推到你面前。",
 			"「签了名，行价就由不得你一个人定了。」",
@@ -6674,15 +6724,15 @@ func _apply_special(s: String) -> void:
 		], false)
 	elif s == "set_price":
 		shop["market"] = clampf(float(shop.get("market", 1.0)) + 0.10, 0.70, 1.40)
-		fame = minf(100.0, fame + 2.0)
+		_add_fame(2.0)
 		_toast("你和几家同行议定了今年的价，行情涨了一成。", Color(0.30, 0.26, 0.21))
 	elif s == "med_apprentice":
 		med_rank = 1
 		var bonus := 0.0
 		if craft >= 40.0:
 			bonus = 6.0
-		medicine = minf(100.0, medicine + 6.0 + bonus)
-		fame = minf(100.0, fame + 2.0)
+		_add_medicine(6.0 + bonus)
+		_add_fame(2.0)
 		_leave_old_line("med")
 		if bonus > 0.0:
 			_toast("你懂火候，也认得几味药性，师父多教了你一手。", Color(0.30, 0.26, 0.21))
@@ -6690,7 +6740,7 @@ func _apply_special(s: String) -> void:
 			_toast("你给师父磕了头。他说：先背三年汤头歌。", Color(0.30, 0.26, 0.21))
 	elif s == "med_journeyman":
 		med_rank = 2
-		fame = minf(100.0, fame + 8.0)
+		_add_fame(8.0)
 		_play_cutscene("出 师", [
 			"师父把药箱递给你，说：开方子之前，先看人。",
 			"「治不好的，别硬治。说一句我治不了，不丢人。」",
@@ -6699,15 +6749,15 @@ func _apply_special(s: String) -> void:
 	elif s == "med_visit":
 		if _arnd() < 0.75:
 			money += 2200
-			fame = minf(100.0, fame + 4.0)
+			_add_fame(4.0)
 			_toast("这一趟治好了，主家塞给你两贯钱，还提了一篮鸡蛋。", Color(0.30, 0.42, 0.22))
 		else:
 			money = maxi(0, money - 600)
-			fame = maxf(0.0, fame - 7.0)
+			_add_fame(-(7.0))
 			_toast("病人没救回来。家属在门口骂了半日，你一分钱没收。", Color(0.62, 0.24, 0.18))
 	elif s == "med_clinic":
 		med_rank = 3
-		fame = minf(100.0, fame + 10.0)
+		_add_fame(10.0)
 		_play_cutscene("坐 堂", [
 			"药铺给你留了一张桌子，桌上一方砚、一管笔。",
 			"第一位病人是个咳了半年的老人。",
@@ -6716,7 +6766,7 @@ func _apply_special(s: String) -> void:
 	elif s == "med_book":
 		med_rank = 4
 		med_book = true
-		fame = minf(100.0, fame + 18.0)
+		_add_fame(18.0)
 		_add_learning(5.0)
 		_play_cutscene("著 书", [
 			"你把三十年看过的方子抄了一遍，删去一半。",
@@ -6737,7 +6787,7 @@ func _apply_special(s: String) -> void:
 	elif s == "farm_collect":
 		var rent := land * (150 if farm_rank == 3 else 190)
 		money += rent
-		fame = minf(100.0, fame + 2.0)
+		_add_fame(2.0)
 		_toast("%d亩田的租子收上来，共 %d 文。" % [land, rent], Color(0.30, 0.42, 0.22))
 	elif s == "farm_buy":
 		land += 1
@@ -6791,14 +6841,14 @@ func _apply_special(s: String) -> void:
 		_toast("大军推进三十里，你跟着走完全程。战功记了一次。", Color(0.30, 0.26, 0.21))
 	elif s == "promote_nco":
 		mil_rank = 2
-		fame = minf(100.0, fame + 6.0)
+		_add_fame(6.0)
 		_play_cutscene("升 厢 军", [
 			"教头把你的名字从乡兵册上划掉，写到另一本上。",
 			"「从今天起，你吃军粮，不种田了。」",
 		], false)
 	elif s == "promote_officer":
 		mil_rank = 3
-		fame = minf(100.0, fame + 15.0)
+		_add_fame(15.0)
 		_play_cutscene("授 军 官", [
 			"授官的文书下来那天，营里杀了三头猪。",
 			"你穿上新甲走到校场，看底下的人跟你从前一样站着。",
@@ -6809,7 +6859,7 @@ func _apply_special(s: String) -> void:
 			_die_young()
 			return
 		money += 6000
-		fame = minf(100.0, fame + 8.0)
+		_add_fame(8.0)
 		_toast("巡边一年，遇了一小股马贼，斩了七级。", Color(0.30, 0.42, 0.22))
 	elif s == "take_post":
 		office_rank = 1
@@ -6831,17 +6881,17 @@ func _apply_special(s: String) -> void:
 	elif s == "judge_fair":
 		if _arnd() < 0.60:
 			gov_merit += 2
-			fame = minf(100.0, fame + 3.0)
+			_add_fame(3.0)
 			_toast("判得公，两造都服。县里传你是个明白官。", Color(0.30, 0.42, 0.22))
 		else:
 			gov_merit += 1
-			fame = maxf(0.0, fame - 2.0)
+			_add_fame(-(2.0))
 			money = maxi(0, money - 500)
 			_toast("你判得不合豪强的心意，夜里有人往门上泼了粪。", Color(0.62, 0.24, 0.18))
 	elif s == "judge_bribe":
 		money += 3000
 		gov_merit -= 1
-		fame = maxf(0.0, fame - 3.0)
+		_add_fame(-(3.0))
 		scandal += 1
 		_toast("银子收了，案子改了。你夜里睡得不太安稳。", Color(0.48, 0.32, 0.16))
 	elif s == "gov_farm":
@@ -6853,20 +6903,20 @@ func _apply_special(s: String) -> void:
 			return
 		office_rank = mini(3, office_rank + 1)
 		gov_merit = 0
-		fame = minf(100.0, fame + 10.0)
+		_add_fame(10.0)
 		_play_cutscene("升 迁", [
 			"考绩上上，你由%s升%s。" % [str(["", "主簿", "县令", "通判"][office_rank - 1]), _office_name()],
 			"接印那天，旧同僚来道贺，脸上笑着，话说得很客气。",
 		], false)
 	elif s == "retire":
 		story["致仕"] = true
-		fame = minf(100.0, fame + 5.0)
+		_add_fame(5.0)
 		_toast("你递了告老的状子。回乡那天，只有两个老吏送到城外。", Color(0.30, 0.26, 0.21))
 	elif s == "jieshi":
 		var p := clampf(0.10 + learning * 0.010, 0.05, 0.90)
 		if _arnd() < p:
 			story["举人"] = true
-			fame = minf(100.0, fame + 18.0)
+			_add_fame(18.0)
 			_log_fact("exam", "jieshi_pass", {"year": year})
 			_play_cutscene("解 试", [
 				"榜贴在州学墙上，人挤得水泄不通。",
@@ -6874,14 +6924,14 @@ func _apply_special(s: String) -> void:
 				"有人拍你的肩，你才发现自己在发抖。",
 			], false)
 		else:
-			fame = maxf(0.0, fame - 1.0)
+			_add_fame(-(1.0))
 			_log_fact("exam", "jieshi_fail", {"year": year})
 			_toast("解试落第。你在贡院外站到人都散了。", Color(0.62, 0.24, 0.18))
 	elif s == "shengshi":
 		var p2 := clampf(-0.08 + learning * 0.008, 0.04, 0.85)
 		if _arnd() < p2:
 			story["进士"] = true
-			fame = minf(100.0, fame + 30.0)
+			_add_fame(30.0)
 			money += 4000
 			_play_cutscene("登 第", [
 				"殿试唱名，你名列三甲。",
@@ -6889,7 +6939,7 @@ func _apply_special(s: String) -> void:
 				"回乡时，县里给你家送了匾。",
 			], false)
 		else:
-			fame = maxf(0.0, fame - 2.0)
+			_add_fame(-(2.0))
 			_log_fact("exam", "shengshi_fail", {"year": year})
 			_toast("省试落第。盘缠花光了，你在京城住了半年才凑够路费。", Color(0.62, 0.24, 0.18))
 
@@ -7064,7 +7114,7 @@ func _on_new_year() -> void:
 		else:
 			var short := cost - money
 			money = 0
-			fame = maxf(0.0, fame - 2.0)
+			_add_fame(-(2.0))
 			health = maxf(0.0, health - 1.0)
 			story["欠年"] = int(story.get("欠年", 0)) + 1
 			_toast("年关难过，短了 %d 文。典了件旧衣，债又添一笔。" % short, Color(0.62, 0.24, 0.18))
@@ -7075,7 +7125,7 @@ func _on_new_year() -> void:
 	if scandal >= 3 and office_rank > 0:
 		scandal = 0
 		office_rank = maxi(0, office_rank - 1)
-		fame = maxf(0.0, fame - 15.0)
+		_add_fame(-(15.0))
 		money = maxi(0, money - 2000)
 		story["贬谪"] = int(story.get("贬谪", 0)) + 1
 		_toast("御史弹劾你贪墨，降一级，追赃两千文。", Color(0.62, 0.24, 0.18))
@@ -7108,7 +7158,7 @@ func _on_new_year() -> void:
 	# 抱孙
 	if age == 62 and children > 0 and not milestones.has("grandchild"):
 		milestones["grandchild"] = true
-		fame = minf(100.0, fame + 5.0)
+		_add_fame(5.0)
 		_play_cutscene("抱 孙", [
 			"孙子满月，家里摆了四桌。",
 			"有人把孩子递到你怀里，你忽然想起自己也有过这么小的时候。",
@@ -7741,7 +7791,7 @@ func _npc_act(who: String, st: Dictionary) -> void:
 				act = "warn"
 				_toast("里正背着手看了你一眼。", Color(0.62, 0.24, 0.18))
 			else:
-				fame = minf(100.0, fame + 1.0)
+				_add_fame(1.0)
 				act = "keep_order"
 		"drift":
 			if money > 300:
@@ -7913,7 +7963,7 @@ func _apply_event_effects(def: Dictionary) -> void:
 	if d_health != 0.0:
 		health = clampf(health + d_health, 0.0, 100.0)
 	if d_fame != 0.0:
-		fame = clampf(fame + d_fame, 0.0, 100.0)
+		_add_fame(d_fame)
 	if eff.has("story"):
 		story[str(eff["story"])] = true
 	var txt := str(def.get("text", ""))
@@ -8060,7 +8110,7 @@ func _apply_event(id: String) -> void:
 		"neighbor_guarantee":
 			var gain := 800
 			money += gain
-			fame = minf(100.0, fame + 2.0)
+			_add_fame(2.0)
 			story["有人作保"] = true
 			_toast("孙四替你在里正面前说了句话，县里减了你一半的差役钱。", Color(0.30, 0.42, 0.22))
 		"plague":
