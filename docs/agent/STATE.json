@@ -1,6 +1,6 @@
 ﻿{
     "planning_version":  "1.0",
-    "recorded_at":  "2026-10-24",
+    "recorded_at":  "2026-10-25",
     "timezone":  "Asia/Shanghai",
     "repository":  "https://github.com/nicojiong/Life",
     "audit_baseline_sha":  "2d035379f21abbc8d1d6f06d0328eb756751b993",
@@ -9,17 +9,17 @@
     "godot_run":  "import_only",
     "game_code_modified":  false,
     "remote_mutations_performed":  true,
-    "current_task":  "M2-01 事件定义/实例/校验",
+    "current_task":  "M3-06 试玩入口与路线说明",
     "next_task":  "真人试玩验收（pending_user_acceptance）",
     "task_status":  "ready_for_user_acceptance",
     "branch":  "agent/m2-m3",
     "base_sha":  "bf0846f1c20cbcf4dd0cf5f5707b0cf1c88e12cb",
-    "commit_sha":  "07462f38d7b6b852c9bf6bf13cfc28ed232d1d73",
-    "remote_sha":  "07462f38d7b6b852c9bf6bf13cfc28ed232d1d73",
+    "commit_sha":  "c99f91731e4d2ddb75ec33cc68a8410286e36e09",
+    "remote_sha":  "c99f91731e4d2ddb75ec33cc68a8410286e36e09",
     "pr_url":  "https://github.com/nicojiong/Life/pull/1",
-    "ci_status":  "green: isolated-smoke + continuity 均 success (9c86ac7)",
+    "ci_status":  "green: isolated-smoke + continuity (8c65a99)",
     "integrated_sha":  null,
-    "blocked_reason":  "仍有限制：只有 Linux CI；数据文件无 schema 校验；无真人试玩。PR 已存在（#1, Draft），不再阻塞。",
+    "blocked_reason":  "未合并 main、未发布 Release；真人试玩为 pending_user_acceptance。",
     "evidence":  [
                      "docs/PR_M2M3.md",
                      "docs/PLAYTEST_M2M3.md",
@@ -28,9 +28,14 @@
     "next_step":  "用户按 docs/PLAYTEST_M2M3.md 试玩三条路线，重点看两个早年选择例子；有反馈再开 M3 修补",
     "playtest":  {
                      "baseline_sha":  "b50abd09f01a5664822f91d8101126ef4d09e89f",
-                     "entry":  "playtest.bat（独立存档 浮生试玩） / play.bat（原存档 浮生）",
+                     "entry":  "playtest.bat（隔离 LifePlaytest） / play.bat（原存档） / tools/playtest_check.ps1（启动自检）",
                      "save_dir":  "%APPDATA%\\Godot\\app_userdata\\LifePlaytest",
-                     "docs":  "docs/PLAYTEST.md"
+                     "docs":  "docs/PLAYTEST_M2M3.md"
                  },
-    "candidate_branch":  "agent/m2-m3"
+    "candidate_branch":  "agent/m2-m3",
+    "ready_for_user_acceptance":  true,
+    "human_play":  "pending_user_acceptance",
+    "assertions":  63,
+    "save_schema":  21,
+    "events":  41
 }
