@@ -4009,6 +4009,40 @@ func _run_verify_smoke() -> void:
 		print("[VERIFY] FAIL panel_actions_respond tested=", pa_tested, " dead=", pa_dead)
 
 
+	# M3-13：年纪门槛必须在执行层生效——小孩不能应省试
+	var ag_snap := _replay_snapshot()
+	var ag_rieshi: Dictionary = {"label": "应省试（测试）", "months": 12, "cost": 3000,
+		"special": "shengshi", "min_age": 16}
+	ended = false
+	year = 1050
+	month = 3
+	learning = 200.0
+	money = 9999
+	action_cooldown = {}
+	story.erase("举人")
+	story.erase("进士")
+	age = 10
+	var ag_money0 := money
+	var ag_idx0 := _month_index()
+	_on_action(ag_rieshi)
+	var ag_blocked: bool = money == ag_money0 and _month_index() == ag_idx0 and not story.has("进士")
+	# 到年纪后同一条动作必须能执行
+	age = 20
+	story["举人"] = true
+	action_cooldown = {}
+	var ag_idx1 := _month_index()
+	_on_action(ag_rieshi)
+	var ag_allowed: bool = money < 9999 or _month_index() != ag_idx1
+	_replay_restore(ag_snap)
+	var ag_ok: bool = ag_blocked and ag_allowed
+	if ag_ok:
+		oks += 1
+		print("[VERIFY] PASS min_age_gate blocked_at10=", ag_blocked, " allowed_at20=", ag_allowed)
+	else:
+		fails.append("min_age_gate")
+		print("[VERIFY] FAIL min_age_gate blocked_at10=", ag_blocked, " allowed_at20=", ag_allowed)
+
+
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
 	var keep_age := age
@@ -6580,6 +6614,10 @@ func _on_action(act: Dictionary) -> void:
 	var cost := int(act.get("cost", 0))
 	if cost > money:
 		_toast("钱不够。", Color(0.62, 0.24, 0.18))
+		return
+	# M3-13：年纪门槛必须在执行层把住，不能只靠 UI 不显示按钮
+	if act.has("min_age") and age < int(act["min_age"]):
+		_toast("还不到年纪。", Color(0.62, 0.24, 0.18))
 		return
 	if act.has("req"):
 		var req: Dictionary = act["req"]
