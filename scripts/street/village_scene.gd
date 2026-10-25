@@ -3966,6 +3966,49 @@ func _run_verify_smoke() -> void:
 		print("[VERIFY] FAIL academy_teaching_clickable found=", ck_found, " money=", ck_money_ok, " time=", ck_time_ok, " cooldown=", ck_cooldown_ok)
 
 
+	# M3-12：面板动作不能是"文案摆设"——逐条点一次，必须有钱/属性/时间/冷却中的任一响应
+	var pa_snap := _replay_snapshot()
+	var pa_tested := 0
+	var pa_dead: Array = []
+	var pa_panels := ["home", "field", "school", "market", "academy", "temple", "yamen",
+		"teahouse", "pharmacy", "shrine", "smithy", "tavern", "pawnshop", "washe",
+		"mulberry", "dye", "inn", "drill", "dock", "lot", "grave", "garden", "thresh"]
+	for pid in pa_panels:
+		var pa_acts: Array = _actions_for(str(pid))
+		for a in pa_acts:
+			if pa_tested >= 40:
+				break
+			var d: Dictionary = a
+			if d.has("special"):
+				continue
+			if not d.has("gain"):
+				continue
+			_replay_restore(pa_snap)
+			ended = false
+			age = 30
+			money = 99999
+			learning = 200.0
+			action_cooldown = {}
+			var m0 := _month_index()
+			var sig0 := "%d|%.2f|%.2f|%.2f" % [money, learning, craft, fame]
+			_on_action(d)
+			var sig1 := "%d|%.2f|%.2f|%.2f" % [money, learning, craft, fame]
+			var moved := _month_index() != m0
+			var changed := sig0 != sig1
+			var cooled := not _cooldown_ready(_action_key(d))
+			if not (moved or changed or cooled):
+				pa_dead.append("%s:%s" % [str(pid), str(d.get("label", ""))])
+			pa_tested += 1
+	_replay_restore(pa_snap)
+	var pa_ok: bool = pa_tested >= 15 and pa_dead.is_empty()
+	if pa_ok:
+		oks += 1
+		print("[VERIFY] PASS panel_actions_respond tested=", pa_tested, " dead=", pa_dead.size())
+	else:
+		fails.append("panel_actions_respond")
+		print("[VERIFY] FAIL panel_actions_respond tested=", pa_tested, " dead=", pa_dead)
+
+
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
 	var keep_age := age
