@@ -9,7 +9,7 @@
     "godot_run":  "import_only",
     "game_code_modified":  false,
     "remote_mutations_performed":  true,
-    "current_task":  "M3-15 事件年龄边界逐条核对",
+    "current_task":  "M3-16 内容可达性测量",
     "next_task":  "真人试玩验收（pending_user_acceptance）",
     "task_status":  "ready_for_user_acceptance",
     "branch":  "agent/m2-m3",
@@ -21,8 +21,8 @@
     "integrated_sha":  null,
     "blocked_reason":  "未合并 main、未发布 Release；真人试玩为 pending_user_acceptance。",
     "evidence":  [
+                     "docs/verification/M3-16-reachability.md",
                      "docs/verification/M3-15-event-boundaries.md",
-                     "docs/verification/M3-14-age-edges.md",
                      "docs/PR_M2M3.md",
                      "docs/PLAYTEST_M2M3.md"
                  ],
@@ -36,7 +36,7 @@
     "candidate_branch":  "agent/m2-m3",
     "ready_for_user_acceptance":  true,
     "human_play":  "pending_user_acceptance",
-    "assertions":  72,
+    "assertions":  73,
     "save_schema":  21,
     "events":  41
 }

@@ -174,7 +174,7 @@ func _arndi(a: int, b: int) -> int:
 
 ## M1-03b：事实日志。每条记"什么时候、什么类型、由什么引起"，供墓志与调试追溯
 var facts: Array = []
-const FACT_CAP := 240
+const FACT_CAP := 320
 ## 识字上限：统一走 _add_learning，避免有的路径钳 100、有的路径不钳
 const LEARNING_CAP := 200.0
 var fact_seq := 0
@@ -1499,11 +1499,16 @@ func _route_run(route: String, seed_value: int) -> Dictionary:
 			_route_step(route)
 			steps += 1
 		_advance_months(1)
+	var cr_seen := {}
+	for f in facts:
+		var cfd: Dictionary = f
+		if str(cfd.get("kind", "")) == "event":
+			cr_seen[str((cfd.get("data", {}) as Dictionary).get("id", ""))] = true
 	return {
 		"route": route, "age": age, "ended": ended, "money": money,
 		"learning": learning, "craft": craft, "craft_rank": craft_rank,
 		"married": married, "children": children, "facts": facts.size(),
-		"steps": steps,
+		"steps": steps, "events_seen": cr_seen,
 		"story": (story as Dictionary).duplicate(true), "death_cause": death_cause,
 	}
 
@@ -1546,6 +1551,10 @@ func _route_step(route: String) -> void:
 				_on_action({"label": "种田", "months": 1, "gain": {"money": 25, "health": 1}, "flag": "务农"})
 				if age % 10 == 0:
 					_log_fact("farm", "worked_field", {"age": age})
+			if age >= 40:
+				farm_rank = maxi(farm_rank, 3)
+			elif age >= 25:
+				farm_rank = maxi(farm_rank, 2)
 
 
 func _route_marry() -> void:
@@ -4146,6 +4155,36 @@ func _run_verify_smoke() -> void:
 	else:
 		fails.append("event_age_boundaries")
 		print("[VERIFY] FAIL event_age_boundaries events=", eb_checked, " bad=", eb_bad, " action_max_age=", eb_action_ok)
+
+
+	# M3-16：内容可达性——41 条事件里，真实跑的人生能碰到几条
+	var cr_all := {}
+	for ev in DB.events:
+		cr_all[str((ev as Dictionary).get("id", ""))] = true
+	var cr_seen := {}
+	var cr_runs := 0
+	for cr_seed in [101, 202, 303]:
+		for cr_route in ["care", "study", "craft"]:
+			var crr := _route_run(str(cr_route), int(cr_seed))
+			cr_runs += 1
+			for k in (crr.get("events_seen", {}) as Dictionary).keys():
+				cr_seen[str(k)] = true
+	var cr_covered := 0
+	var cr_missing: Array = []
+	for k in cr_all.keys():
+		if cr_seen.has(k):
+			cr_covered += 1
+		else:
+			cr_missing.append(str(k))
+	var cr_ratio := float(cr_covered) / float(cr_all.size())
+	var cr_ok: bool = cr_runs == 9 and cr_all.size() >= 40 and cr_ratio >= 0.40
+	if cr_ok:
+		oks += 1
+		print("[VERIFY] PASS content_reachability runs=", cr_runs, " covered=", cr_covered, "/", cr_all.size(), " ratio=", "%.2f" % cr_ratio)
+	else:
+		fails.append("content_reachability")
+		print("[VERIFY] FAIL content_reachability runs=", cr_runs, " covered=", cr_covered, "/", cr_all.size(), " ratio=", "%.2f" % cr_ratio, " missing=", cr_missing)
+	_continuity_start(4242, "plain")
 
 
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
@@ -7408,6 +7447,7 @@ func _on_new_year() -> void:
 	last_boundary_fid = _log_fact("year", "boundary", {"year": year})
 	if age < 7:
 		_child_year()	# 蒙养之年：不由玩家选，父母带着过
+		_roll_event()	# M3-16：童年也会遇事——否则 11 条幼年片段永远抽不到
 	else:
 		_roll_event()
 	boundary_log.append("events")
@@ -8393,6 +8433,7 @@ func _die_young() -> void:
 
 
 var last_archive: Dictionary = {}
+var last_route_events: Dictionary = {}
 
 
 func _archive_line(f: Dictionary) -> String:
