@@ -85,3 +85,6 @@ CI 对每个提交都跑 `isolated-smoke` 与 `continuity`，最近一次为双�
 - [ ] **真人试玩**（`pending_user_acceptance`）
 - [ ] 合并到 `main`（本轮不做，`integrated_sha` 保持 `null`）
 - [ ] 发布 Release（本轮不做）
+## 七、内容可达性（新增的真实短板）
+
+9 条完整人生（3 种子 × 3 路线）只触发了 **17/41** 条事件（41%）。低的两个已修原因：七岁前不抽事件、农技永不涨；仍低的原因：年抽选率 32%、冷却 12–200 个月。详情见 `docs/verification/M3-16-reachability.md`。
