@@ -548,10 +548,10 @@
                                          "固定种子集合批跑无状态不变量错误，记录样本范围而非声称零bug",
                                          "玩家能辨识人物愿望与自己的两次长期影响"
                                      ],
-                      "status":  "todo",
+                      "status":  "in_progress",
                       "owner":  null,
                       "evidence":  [
-
+                                       "docs/verification/M3-05a-fragments.md"
                                    ],
                       "commit_sha":  null,
                       "remote_sha":  null,

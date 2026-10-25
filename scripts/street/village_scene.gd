@@ -3694,6 +3694,42 @@ func _run_verify_smoke() -> void:
 		print("[VERIFY] FAIL life_archive id=", la_id_ok, " trace=", la_trace_ok, " ordinary=", la_ordinary_ok, " separate=", la_sep_ok, " roundtrip=", la_round_ok, " fresh=", fresh_ok, " la_chapters=", la_chapters.size())
 
 
+	# M3-05：故事片段规模与年龄覆盖——内容必须过 schema，且真正分布在各个年龄带
+	var frags: Array = DB.events
+	var frag_ids := {}
+	var frag_bands := {"child": 0, "youth": 0, "adult": 0, "elder": 0}
+	var frag_text := true
+	for ev in frags:
+		var e: Dictionary = ev
+		var eid := str(e.get("id", ""))
+		if eid == "" or frag_ids.has(eid):
+			frag_text = false
+			continue
+		frag_ids[eid] = true
+		if str(e.get("text", "")) == "":
+			frag_text = false
+		var lo := int(e.get("min_age", 0))
+		if lo <= 6:
+			frag_bands["child"] = int(frag_bands["child"]) + 1
+		elif lo <= 17:
+			frag_bands["youth"] = int(frag_bands["youth"]) + 1
+		elif lo <= 45:
+			frag_bands["adult"] = int(frag_bands["adult"]) + 1
+		else:
+			frag_bands["elder"] = int(frag_bands["elder"]) + 1
+	var frag_count_ok: bool = frags.size() >= 40
+	var frag_bands_ok: bool = int(frag_bands["child"]) >= 5 and int(frag_bands["youth"]) >= 5 \
+		and int(frag_bands["adult"]) >= 8 and int(frag_bands["elder"]) >= 4
+	var frag_schema_ok: bool = DB.event_errors.is_empty() and frag_text
+	var fragments_ok: bool = frag_count_ok and frag_bands_ok and frag_schema_ok
+	if fragments_ok:
+		oks += 1
+		print("[VERIFY] PASS story_fragments count=", frags.size(), " bands=", frag_bands)
+	else:
+		fails.append("story_fragments")
+		print("[VERIFY] FAIL story_fragments count=", frags.size(), " bands=", frag_bands, " schema=", frag_schema_ok, " text=", frag_text)
+
+
 	# A01：跨寿终的行动不得继续发奖（放最后，因为它会结束人生）
 	var keep_money := money
 	var keep_age := age
